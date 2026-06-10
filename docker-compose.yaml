@@ -1,0 +1,52 @@
+# PX4 SITL + MAVSDK companion
+#
+# Problem: Docker Desktop for Mac only proxies TCP through host.docker.internal —
+# UDP (MAVLink) sent from a container to the host is silently dropped.
+#
+# Fix: override host.docker.internal → 127.0.0.1 in px4-sitl so the entrypoint
+# patches MAVLink to stay on localhost. The companion container shares px4-sitl's
+# network namespace and receives the MAVLink there.
+#
+# Usage:
+#   docker compose up            ← runs everything; telemetry printed to stdout
+#   uv run python telemetry.py   ← optional: run Python on host instead (needs port 50051)
+#
+# Stop: Ctrl-C / docker compose down
+
+services:
+  px4-sitl:
+    image: px4io/px4-sitl:latest
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"   # keeps MAVLink on localhost
+    ports:
+      - "50051:50051"   # expose gRPC so Python can run on the Mac host too
+
+  app:
+    image: python:3.13-slim
+    depends_on:
+      - px4-sitl
+    network_mode: "service:px4-sitl"
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        echo '>>> [1/4] 安裝 mavsdk ...'
+        pip install --root-user-action=ignore mavsdk
+        BIN=/app/.mavsdk_server_linux
+        if [ ! -x "$$BIN" ]; then
+          echo '>>> [2/4] 下載 mavsdk_server v3.15.0 (linux-arm64-musl) ...'
+          python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/mavlink/MAVSDK/releases/download/v3.15.0/mavsdk_server_linux-arm64-musl','$$BIN')"
+          chmod +x "$$BIN"
+        else
+          echo '>>> [2/4] 已有快取的 mavsdk_server,略過下載'
+        fi
+        echo '>>> [3/4] 背景啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
+        "$$BIN" udpin://0.0.0.0:14540 -p 50051 &
+        sleep 4
+        echo '>>> [4/4] 啟動 Python client ...'
+        python telemetry.py
+    restart: "no"
