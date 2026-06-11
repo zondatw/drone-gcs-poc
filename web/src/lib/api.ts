@@ -8,6 +8,8 @@ async function post(path: string, body?: unknown) {
   return res.json()
 }
 
+import type { Waypoint } from './store'
+
 export const api = {
   arm: () => post('/api/arm'),
   takeoff: (alt = 10) => post('/api/takeoff', { alt }),
@@ -16,4 +18,11 @@ export const api = {
   goto: (lat: number, lon: number, alt?: number) => post('/api/goto', { lat, lon, alt }),
   offboardStart: () => post('/api/offboard/start'),
   offboardStop: () => post('/api/offboard/stop'),
+
+  // 航線任務 (第 3 關 GCS)
+  missionUpload: (waypoints: Waypoint[], alt: number, speed: number) =>
+    post('/api/mission/upload', { waypoints, alt, speed }),
+  missionStart: () => post('/api/mission/start'),
+  missionPause: () => post('/api/mission/pause'),
+  missionClear: () => post('/api/mission/clear'),
 }

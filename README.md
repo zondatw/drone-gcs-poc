@@ -4,6 +4,7 @@ PX4 SITL + MAVSDK PoC, running on Apple Silicon Mac with Docker Desktop.
 
 - **第 1 關** — [server/telemetry.py](server/telemetry.py):連上 mavsdk_server,把遙測印在 console。
 - **第 2 關** — [server/server.py](server/server.py) + [web/](web/):飛行控制 + Cesium 3D 即時地圖（見下方）。
+- **第 3 關** — 同上再長成小型 **GCS**:側欄儀表板 + 點地圖規劃航點上傳飛控 + 畫預定航線（見下方）。
 
 ```
 drone/
@@ -90,12 +91,33 @@ npm run dev                  # 打開 http://localhost:5173
 
 ### 操作
 
-- **看位置**:Cesium 地球上的青色標記就是無人機,左上 HUD 顯示高度/速度/電量/模式,並畫出飛行軌跡。
-- **點地圖飛過去**:按「Arm 解鎖」→「起飛」,然後在地圖上點任一點,無人機會 `goto` 飛過去。
+- **看位置**:Cesium 地球上的青色標記就是無人機,左側欄儀表板顯示連線/高度/速度/電量/模式,並畫出青色飛行軌跡。
 - **鍵盤手動飛**:按「手動操控 (Offboard)」後,用 `WASD` 前後左右、`R/F` 升降、`Q/E` 轉向。
-- 「降落」「返航 RTL」按鈕,以及「鏡頭跟隨」「清除軌跡」。
+- 「Arm 解鎖」「起飛」「降落」「返航 RTL」按鈕,以及「鏡頭跟隨」「清除飛行軌跡」。
 
 ### Cesium 影像 token(選用)
 
 預設用 OpenStreetMap 圖磚,**零設定即可跑**。想要 Cesium 官方高解析影像/地形,
 在 `web/.env` 放 `VITE_CESIUM_ION_TOKEN=你的token`(免費,從 https://cesium.com/ion/tokens 取得)。
+
+## 第 3 關:小型 GCS — 航線規劃
+
+在第 2 關的地圖 + 控制之上,長出地面站(GCS)雛形:**左側欄儀表板**(連線狀態、電量條、速度、
+高度、模式、任務進度)、**點地圖規劃航點**並上傳到飛控執行、地圖上同時畫出**飛行軌跡**(青色)
+與**預定航線**(黃色虛線 + 編號航點)。
+
+後端新增 [server/server.py](server/server.py) 的 `mission` 端點(用 MAVSDK mission plugin):
+
+```
+POST /api/mission/upload  { waypoints:[{lat,lon}], alt, speed }   # 上傳航點任務
+POST /api/mission/start                                            # 開始(自動 arm + 切 MISSION)
+POST /api/mission/pause / clear                                    # 暫停 / 清除
+```
+任務進度(第幾個航點 / 共幾個)會跟著 `/ws/telemetry` 一起推回前端儀表板。
+
+### 規劃並飛一條航線
+
+1. 在地圖上**依序點選**幾個點 → 出現黃色編號航點與預定航線(此時只是規劃,還沒送飛控)。
+2. 側欄設定**高度 / 速度**,按「**上傳航線**」把任務送進 PX4。
+3. 按「**開始任務**」→ 無人機自動 arm、起飛、依序飛過每個航點;側欄即時顯示「第 N / 共 M 航點」。
+4. 「暫停 / 清除任務」「復原 / 清除航線」隨時可用。

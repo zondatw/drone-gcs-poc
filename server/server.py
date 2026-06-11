@@ -1,12 +1,13 @@
 """
-第 2 關:飛行控制 + 即時遙測 Web 後端。
+第 2~3 關:飛行控制 + 即時遙測 + 航線任務 Web 後端 (小型 GCS)。
 
 沿用第 1 關 (telemetry.py) 連到「已經在跑」的 mavsdk_server (gRPC localhost:50051) 的做法,
-但這裡不只讀遙測,還對外開三種介面給前端 (web/) 用:
+但這裡不只讀遙測,還對外開這些介面給前端 (web/) 用:
 
-  - WS  /ws/telemetry  : 持續推播 位置 / 姿態 / 速度 / 電量 / 模式
+  - WS  /ws/telemetry  : 持續推播 位置 / 姿態 / 速度 / 電量 / 模式 / 任務進度
   - WS  /ws/control    : 收 WASD 速度 setpoint -> offboard.set_velocity_body (手動操控)
   - REST /api/...       : arm / takeoff / land / rtl / goto / offboard 起停 (按鈕 + 點地圖)
+  - REST /api/mission/* : 上傳航點任務 / 開始 / 暫停 / 清除 (第 3 關 GCS 航線規劃)
 
 啟動: uv run uvicorn server:app --reload  (PX4 + mavsdk_server 需先用 docker compose 跑起來)
 """
@@ -21,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mavsdk import System
 from mavsdk.action import ActionError
+from mavsdk.mission import MissionItem, MissionPlan, MissionError
 from mavsdk.offboard import OffboardError, VelocityBodyYawspeed
 
 log = logging.getLogger("drone")
@@ -38,6 +40,7 @@ latest: dict = {
     "abs_alt": None, "rel_alt": None, "ground_alt": None,
     "heading": None, "ground_speed": None, "vd": None,
     "battery_pct": None, "flight_mode": None, "armed": None,
+    "mission_current": None, "mission_total": None,  # 任務進度 (第 N 個 / 共幾個)
 }
 subscribers: set[asyncio.Queue] = set()
 _offboard_active = False
@@ -91,6 +94,12 @@ async def _watch_armed() -> None:
         latest["armed"] = armed
 
 
+async def _watch_mission_progress() -> None:
+    async for mp in drone.mission.mission_progress():
+        latest["mission_current"] = mp.current  # 已抵達的航點索引 (-1 = 尚未開始)
+        latest["mission_total"] = mp.total
+
+
 async def _push_loop() -> None:
     """固定 ~10Hz 把 latest 推給所有前端,讓 battery/mode 這種低頻變化也會傳到。"""
     while True:
@@ -120,6 +129,7 @@ async def lifespan(_: FastAPI):
         asyncio.create_task(c) for c in (
             _watch_position(), _watch_attitude(), _watch_velocity(),
             _watch_battery(), _watch_flight_mode(), _watch_armed(),
+            _watch_mission_progress(),
             _push_loop(),
         )
     ]
@@ -187,7 +197,7 @@ async def cmd(coro):
     try:
         await coro
         return {"ok": True}
-    except ActionError as e:
+    except (ActionError, MissionError) as e:
         return {"ok": False, "error": str(e)}
 
 
@@ -266,3 +276,59 @@ async def api_offboard_stop():
 @app.get("/api/state")
 async def api_state():
     return {**latest, "offboard": _offboard_active}
+
+
+# ── 航線任務 (第 3 關 GCS) ────────────────────────────────────────────────
+class Waypoint(BaseModel):
+    lat: float
+    lon: float
+    alt: float | None = None  # 相對地面高度 (m);省略則用整條任務的預設高度
+
+
+class MissionBody(BaseModel):
+    waypoints: list[Waypoint]
+    alt: float = 30.0    # 預設航點高度 (相對地面)
+    speed: float = 5.0   # 巡航速度 (m/s)
+
+
+def _make_item(lat: float, lon: float, alt: float, speed: float) -> MissionItem:
+    """把一個航點包成 MissionItem;不需要的相機/雲台欄位全給 NaN。"""
+    nan = float("nan")
+    return MissionItem(
+        lat, lon, alt, speed,
+        True,                              # is_fly_through: 直接穿過不停留
+        nan, nan,                          # gimbal pitch / yaw
+        MissionItem.CameraAction.NONE,
+        nan, nan, nan, nan, nan,           # loiter / photo interval / acceptance radius / yaw / photo distance
+        MissionItem.VehicleAction.NONE,
+    )
+
+
+@app.post("/api/mission/upload")
+async def api_mission_upload(body: MissionBody):
+    if not body.waypoints:
+        return {"ok": False, "error": "沒有航點"}
+    items = [
+        _make_item(w.lat, w.lon, w.alt if w.alt is not None else body.alt, body.speed)
+        for w in body.waypoints
+    ]
+    await cmd(drone.mission.clear_mission())
+    return {**await cmd(drone.mission.upload_mission(MissionPlan(items))), "count": len(items)}
+
+
+@app.post("/api/mission/start")
+async def api_mission_start():
+    # 開始任務前要先 arm;PX4 會切到 MISSION 模式自動飛航點。
+    with contextlib.suppress(Exception):
+        await drone.action.arm()
+    return await cmd(drone.mission.start_mission())
+
+
+@app.post("/api/mission/pause")
+async def api_mission_pause():
+    return await cmd(drone.mission.pause_mission())
+
+
+@app.post("/api/mission/clear")
+async def api_mission_clear():
+    return await cmd(drone.mission.clear_mission())

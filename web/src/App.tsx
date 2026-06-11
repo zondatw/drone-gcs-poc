@@ -1,6 +1,5 @@
 import { DroneViewer } from './components/DroneViewer'
-import { Hud } from './components/Hud'
-import { ControlPanel } from './components/ControlPanel'
+import { Sidebar } from './components/Sidebar'
 import { useTelemetry } from './hooks/useTelemetry'
 import './App.css'
 
@@ -9,9 +8,10 @@ export default function App() {
 
   return (
     <div className="app">
-      <DroneViewer />
-      <Hud />
-      <ControlPanel />
+      <Sidebar />
+      <div className="map">
+        <DroneViewer />
+      </div>
     </div>
   )
 }

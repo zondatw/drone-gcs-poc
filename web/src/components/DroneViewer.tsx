@@ -4,7 +4,6 @@ import {
 } from 'resium'
 import * as Cesium from 'cesium'
 import { useStore } from '../lib/store'
-import { api } from '../lib/api'
 
 // 起飛點 (PX4 SITL 預設,蘇黎世)。
 const HOME_LON = 8.5456
@@ -22,7 +21,7 @@ const VIEW_FROM = new Cesium.Cartesian3(0, -250, 200)
 // 比起在父層用 ref.current?.cesiumElement 可靠 — 後者在 effect 執行時常常還是 null。
 function SceneSetup() {
   const { viewer } = useCesium()
-  const setTarget = useStore((s) => s.setTarget)
+  const addWaypoint = useStore((s) => s.addWaypoint)
 
   useEffect(() => {
     if (!viewer) return
@@ -44,19 +43,20 @@ function SceneSetup() {
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 },
     })
 
+    // 點地圖 → 加一個航點 (規劃航線,還沒送飛控;按側欄「上傳航線」才送)。
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
     handler.setInputAction((e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       const cartesian = viewer.camera.pickEllipsoid(e.position, viewer.scene.globe.ellipsoid)
       if (!cartesian) return
       const c = Cesium.Cartographic.fromCartesian(cartesian)
-      const lon = Cesium.Math.toDegrees(c.longitude)
-      const lat = Cesium.Math.toDegrees(c.latitude)
-      setTarget([lon, lat])
-      api.goto(lat, lon)
+      addWaypoint({
+        lat: Cesium.Math.toDegrees(c.latitude),
+        lon: Cesium.Math.toDegrees(c.longitude),
+      })
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
     return () => handler.destroy()
-  }, [viewer, setTarget])
+  }, [viewer, addWaypoint])
 
   return null
 }
@@ -75,10 +75,14 @@ function FollowCam() {
   return null
 }
 
+// 預定航線用的黃色虛線。
+const ROUTE_MATERIAL = new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW })
+
 export function DroneViewer() {
   const t = useStore((s) => s.telemetry)
   const trail = useStore((s) => s.trail)
-  const target = useStore((s) => s.target)
+  const waypoints = useStore((s) => s.waypoints)
+  const missionAlt = useStore((s) => s.missionAlt)
 
   const hasPos = t.lat != null && t.lon != null
   const dronePos = hasPos
@@ -94,6 +98,17 @@ export function DroneViewer() {
   const trailPositions = useMemo(
     () => (trail.length >= 6 ? Cesium.Cartesian3.fromDegreesArrayHeights(trail) : []),
     [trail],
+  )
+
+  // 預定航線:把航點依序連起來 (在規劃高度上)。
+  const routePositions = useMemo(
+    () =>
+      waypoints.length >= 2
+        ? Cesium.Cartesian3.fromDegreesArrayHeights(
+            waypoints.flatMap((w) => [w.lon, w.lat, missionAlt]),
+          )
+        : [],
+    [waypoints, missionAlt],
   )
 
   return (
@@ -141,22 +156,32 @@ export function DroneViewer() {
         </Entity>
       )}
 
-      {target && (
-        <Entity position={Cesium.Cartesian3.fromDegrees(target[0], target[1], t.ground_alt ?? 0)}>
+      {/* 預定航線 (黃色虛線) */}
+      {routePositions.length > 0 && (
+        <Entity>
+          <PolylineGraphics positions={routePositions} width={2} material={ROUTE_MATERIAL} />
+        </Entity>
+      )}
+
+      {/* 航點標記 (編號) */}
+      {waypoints.map((w, i) => (
+        <Entity key={`wp-${i}`} position={Cesium.Cartesian3.fromDegrees(w.lon, w.lat, missionAlt)}>
           <PointGraphics
             pixelSize={12}
-            color={Cesium.Color.ORANGE}
-            outlineColor={Cesium.Color.WHITE}
+            color={Cesium.Color.YELLOW}
+            outlineColor={Cesium.Color.BLACK}
             outlineWidth={2}
           />
           <LabelGraphics
-            text="目標"
-            font="12px sans-serif"
-            fillColor={Cesium.Color.ORANGE}
+            text={`${i + 1}`}
+            font="bold 13px sans-serif"
+            fillColor={Cesium.Color.BLACK}
+            showBackground
+            backgroundColor={Cesium.Color.YELLOW}
             pixelOffset={new Cesium.Cartesian2(0, -20)}
           />
         </Entity>
-      )}
+      ))}
     </Viewer>
   )
 }
