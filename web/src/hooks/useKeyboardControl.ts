@@ -9,7 +9,8 @@ const RATE_HZ = 15
 //   W/S = 前/後   A/D = 左/右   R/F = 上/下   Q/E = 左轉/右轉
 // body 座標系: forward 前正, right 右正, down 下正, yawspeed 順時針正。
 export function useKeyboardControl() {
-  const offboardActive = useStore((s) => s.offboardActive)
+  const activeIndex = useStore((s) => s.activeIndex)
+  const offboardActive = useStore((s) => s.drones[s.activeIndex]?.offboardActive ?? false)
 
   useEffect(() => {
     if (!offboardActive) return
@@ -32,6 +33,7 @@ export function useKeyboardControl() {
       const k = (c: string) => (keys.has(c) ? 1 : 0)
       ws.send(
         JSON.stringify({
+          drone: activeIndex,
           forward: (k('w') - k('s')) * SPEED,
           right: (k('d') - k('a')) * SPEED,
           down: (k('f') - k('r')) * SPEED, // f=下降(down正), r=上升
@@ -46,5 +48,5 @@ export function useKeyboardControl() {
       window.removeEventListener('keyup', onUp)
       ws.close()
     }
-  }, [offboardActive])
+  }, [offboardActive, activeIndex])
 }

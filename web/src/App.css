@@ -36,6 +36,31 @@
   letter-spacing: 0.5px;
 }
 
+/* 選台 chips */
+.fleet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.drone-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  border-radius: 8px;
+}
+.drone-chip.active {
+  background: #1f3550;
+  border-color: #60a5fa;
+}
+.chip-dot { width: 10px; height: 10px; border-radius: 50%; }
+.chip-batt { font-size: 11px; color: #93a7bd; font-weight: 500; }
+.chip-batt.bad { color: #f87272; }
+
 .card {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(120, 160, 200, 0.18);
@@ -165,6 +190,42 @@ button.ghost { background: transparent; }
 }
 .wp-actions { margin-left: auto; display: flex; gap: 6px; }
 .wp-actions button { padding: 4px 8px; font-size: 12px; }
+
+/* 航點清單 (可插入/刪除) */
+.wp-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid rgba(120, 160, 200, 0.15);
+  border-radius: 6px;
+}
+.wp-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(120, 160, 200, 0.1);
+}
+.wp-list li:last-child { border-bottom: none; }
+.wp-no {
+  flex: 0 0 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #0c1119;
+  background: #fbbd23;
+  border-radius: 50%;
+}
+.wp-xy { flex: 1; font-variant-numeric: tabular-nums; color: #cdd9e5; }
+.wp-list button {
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
 .mission-prog {
   margin-top: 10px;
   padding: 8px;

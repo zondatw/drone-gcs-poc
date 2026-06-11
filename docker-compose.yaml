@@ -1,37 +1,33 @@
-# PX4 SITL + mavsdk_server
+# 多機 PX4 SITL + mavsdk_server —— 本檔由 gen_compose.py 產生,別手改。
 #
-# Problem: Docker Desktop for Mac only proxies TCP through host.docker.internal —
-# UDP (MAVLink) sent from a container to the host is silently dropped.
+# 每台無人機一組獨立容器(各自 netns):
+#   px4-sitl-{i}  PX4 SITL(PX4_HOME_* 錯開起飛點)→ 對外 gRPC host port 5005{i}
+#   mavsdk-{i}    與 px4-sitl-{i} 共用 netns,跑 mavsdk_server(udpin 14540 → gRPC 50051)
 #
-# Fix: override host.docker.internal → 127.0.0.1 in px4-sitl so the entrypoint
-# patches MAVLink to stay on localhost. The companion container shares px4-sitl's
-# network namespace and receives the MAVLink there.
+# 啟動:
+#   python gen_compose.py 3    # 產生本檔
+#   docker compose up            # 等各台 GPS lock
+#   cd server && DRONE_COUNT=3 uv run uvicorn server:app --reload
 #
-# Design: the container only provides infra (PX4 + mavsdk_server). The Python
-# client runs on the Mac host as the *single* gRPC client (gRPC :50051 exposed).
-# Two clients on one mavsdk_server makes command ACKs (arm/takeoff) time out,
-# so we deliberately don't run any Python client inside the container.
-#
-# Usage:
-#   docker compose up            ← PX4 + mavsdk_server (gRPC :50051)
-#   uv run python telemetry.py   ← 第 1 關: 印遙測
-#   uv run uvicorn server:app    ← 第 2 關: 飛行控制 + Web (見 README)
-#
-# Stop: Ctrl-C / docker compose down
+# 台數要改:重跑 gen_compose.py 並把 DRONE_COUNT 設成一樣。
 
 services:
-  px4-sitl:
+  px4-sitl-1:
     image: px4io/px4-sitl:latest
     extra_hosts:
       - "host.docker.internal:127.0.0.1"   # keeps MAVLink on localhost
+    environment:
+      PX4_HOME_LAT: "47.397700"
+      PX4_HOME_LON: "8.545600"
+      PX4_HOME_ALT: "488.0"
     ports:
-      - "50051:50051"   # expose gRPC so Python can run on the Mac host too
+      - "50051:50051"   # 對外 gRPC(drone 1)
 
-  app:
+  mavsdk-1:
     image: python:3.13-slim
     depends_on:
-      - px4-sitl
-    network_mode: "service:px4-sitl"
+      - px4-sitl-1
+    network_mode: "service:px4-sitl-1"
     working_dir: /app
     volumes:
       - ./server:/app
@@ -45,8 +41,74 @@ services:
           echo '>>> 下載 mavsdk_server v3.15.0 (linux-arm64-musl) ...'
           python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/mavlink/MAVSDK/releases/download/v3.15.0/mavsdk_server_linux-arm64-musl','$$BIN')"
           chmod +x "$$BIN"
-        else
-          echo '>>> 已有快取的 mavsdk_server,略過下載'
+        fi
+        echo '>>> 啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
+        exec "$$BIN" udpin://0.0.0.0:14540 -p 50051
+    restart: "no"
+
+  px4-sitl-2:
+    image: px4io/px4-sitl:latest
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"   # keeps MAVLink on localhost
+    environment:
+      PX4_HOME_LAT: "47.398500"
+      PX4_HOME_LON: "8.545600"
+      PX4_HOME_ALT: "488.0"
+    ports:
+      - "50052:50051"   # 對外 gRPC(drone 2)
+
+  mavsdk-2:
+    image: python:3.13-slim
+    depends_on:
+      - px4-sitl-2
+    network_mode: "service:px4-sitl-2"
+    working_dir: /app
+    volumes:
+      - ./server:/app
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        BIN=/app/.mavsdk_server_linux
+        if [ ! -x "$$BIN" ]; then
+          echo '>>> 下載 mavsdk_server v3.15.0 (linux-arm64-musl) ...'
+          python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/mavlink/MAVSDK/releases/download/v3.15.0/mavsdk_server_linux-arm64-musl','$$BIN')"
+          chmod +x "$$BIN"
+        fi
+        echo '>>> 啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
+        exec "$$BIN" udpin://0.0.0.0:14540 -p 50051
+    restart: "no"
+
+  px4-sitl-3:
+    image: px4io/px4-sitl:latest
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"   # keeps MAVLink on localhost
+    environment:
+      PX4_HOME_LAT: "47.399300"
+      PX4_HOME_LON: "8.545600"
+      PX4_HOME_ALT: "488.0"
+    ports:
+      - "50053:50051"   # 對外 gRPC(drone 3)
+
+  mavsdk-3:
+    image: python:3.13-slim
+    depends_on:
+      - px4-sitl-3
+    network_mode: "service:px4-sitl-3"
+    working_dir: /app
+    volumes:
+      - ./server:/app
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        BIN=/app/.mavsdk_server_linux
+        if [ ! -x "$$BIN" ]; then
+          echo '>>> 下載 mavsdk_server v3.15.0 (linux-arm64-musl) ...'
+          python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/mavlink/MAVSDK/releases/download/v3.15.0/mavsdk_server_linux-arm64-musl','$$BIN')"
+          chmod +x "$$BIN"
         fi
         echo '>>> 啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
         exec "$$BIN" udpin://0.0.0.0:14540 -p 50051

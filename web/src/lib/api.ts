@@ -1,4 +1,6 @@
-// 呼叫後端 REST 指令 (走 vite proxy -> server.py)。
+import type { Waypoint } from './store'
+
+// 呼叫後端 REST 指令 (走 vite proxy -> server.py)。每個指令都指定第 i 台 drone。
 async function post(path: string, body?: unknown) {
   const res = await fetch(path, {
     method: 'POST',
@@ -8,21 +10,20 @@ async function post(path: string, body?: unknown) {
   return res.json()
 }
 
-import type { Waypoint } from './store'
+const base = (i: number) => `/api/drone/${i}`
 
 export const api = {
-  arm: () => post('/api/arm'),
-  takeoff: (alt = 10) => post('/api/takeoff', { alt }),
-  land: () => post('/api/land'),
-  rtl: () => post('/api/rtl'),
-  goto: (lat: number, lon: number, alt?: number) => post('/api/goto', { lat, lon, alt }),
-  offboardStart: () => post('/api/offboard/start'),
-  offboardStop: () => post('/api/offboard/stop'),
+  arm: (i: number) => post(`${base(i)}/arm`),
+  takeoff: (i: number, alt = 10) => post(`${base(i)}/takeoff`, { alt }),
+  land: (i: number) => post(`${base(i)}/land`),
+  rtl: (i: number) => post(`${base(i)}/rtl`),
+  goto: (i: number, lat: number, lon: number, alt?: number) => post(`${base(i)}/goto`, { lat, lon, alt }),
+  offboardStart: (i: number) => post(`${base(i)}/offboard/start`),
+  offboardStop: (i: number) => post(`${base(i)}/offboard/stop`),
 
-  // 航線任務 (第 3 關 GCS)
-  missionUpload: (waypoints: Waypoint[], alt: number, speed: number) =>
-    post('/api/mission/upload', { waypoints, alt, speed }),
-  missionStart: () => post('/api/mission/start'),
-  missionPause: () => post('/api/mission/pause'),
-  missionClear: () => post('/api/mission/clear'),
+  missionUpload: (i: number, waypoints: Waypoint[], alt: number, speed: number) =>
+    post(`${base(i)}/mission/upload`, { waypoints, alt, speed }),
+  missionStart: (i: number) => post(`${base(i)}/mission/start`),
+  missionPause: (i: number) => post(`${base(i)}/mission/pause`),
+  missionClear: (i: number) => post(`${base(i)}/mission/clear`),
 }
