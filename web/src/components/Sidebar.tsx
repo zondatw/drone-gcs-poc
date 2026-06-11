@@ -1,7 +1,15 @@
-import { useStore } from '../lib/store'
+import { useStore, type DroneClient } from '../lib/store'
 import { api } from '../lib/api'
+import { randomRoute } from '../lib/route'
 import { droneColor } from './DroneViewer'
 import { useKeyboardControl } from '../hooks/useKeyboardControl'
+
+// 該台的中心點:有遙測座標就用它(地面時即起飛點),否則 fallback home(Zurich + i·0.0008)。
+function centerOf(d: DroneClient | undefined, i: number): [number, number] {
+  const t = d?.telemetry
+  if (t?.lat != null && t?.lon != null) return [t.lat, t.lon]
+  return [47.3977 + 0.0008 * i, 8.5456]
+}
 
 // 左側欄:多機 GCS 儀表板 — 選台 + (目前控制中那台的) 遙測 / 飛控 / 航線。
 export function Sidebar() {
@@ -20,6 +28,7 @@ export function Sidebar() {
   const clearWaypoints = useStore((s) => s.clearWaypoints)
   const insertWaypoint = useStore((s) => s.insertWaypoint)
   const removeWaypoint = useStore((s) => s.removeWaypoint)
+  const setWaypoints = useStore((s) => s.setWaypoints)
 
   useKeyboardControl()
 
@@ -59,6 +68,23 @@ export function Sidebar() {
     if (!r.ok && !String(r.error).includes('TIMEOUT')) alert('開始任務失敗: ' + r.error)
   }
 
+  // 🎲 亂數航線:幫 active 那台生一條。
+  const randomActive = () => setWaypoints(activeIndex, randomRoute(...centerOf(active, activeIndex)))
+
+  // 🎲 全部亂數航線:每台各生一條(繞自己的中心)。
+  const randomAll = () => drones.forEach((d, i) => setWaypoints(i, randomRoute(...centerOf(d, i))))
+
+  // ▶ 全部開始任務:每台有航點才上傳→開始(各台並行,單台內有序)。
+  const startAll = () =>
+    Promise.all(drones.map(async (d, i) => {
+      if (!d.waypoints.length) return
+      await api.missionUpload(i, d.waypoints, d.missionAlt, d.missionSpeed)
+      await api.missionStart(i)
+    }))
+
+  // ‖ 全部暫停任務。
+  const pauseAll = () => Promise.all(drones.map((_, i) => api.missionPause(i)))
+
   const batt = t?.battery_pct ?? null
   const battClass = batt == null ? '' : batt > 50 ? 'ok' : batt > 20 ? 'warn' : 'bad'
   const mode = t?.flight_mode?.replace('FlightMode.', '') ?? '—'
@@ -96,6 +122,16 @@ export function Sidebar() {
           <button className="primary" onClick={() => api.allTakeoff()}>全部起飛</button>
           <button onClick={() => api.allLand()}>全部降落</button>
           <button onClick={() => api.allRtl()}>全部返航</button>
+        </div>
+      </section>
+
+      {/* ── 群組任務:亂數航線 + 全部一起跑 ── */}
+      <section className="card">
+        <h3>群組任務 · 每台各飛各的</h3>
+        <button className="wide" onClick={randomAll}>🎲 全部亂數航線</button>
+        <div className="btn-grid" style={{ marginTop: 8 }}>
+          <button className="primary" onClick={startAll}>▶ 全部開始任務</button>
+          <button onClick={pauseAll}>‖ 全部暫停</button>
         </div>
       </section>
 
@@ -161,6 +197,8 @@ export function Sidebar() {
               onChange={(e) => setMissionSpeed(Number(e.target.value))} />
           </label>
         </div>
+
+        <button className="wide" onClick={randomActive}>🎲 亂數航線</button>
 
         <div className="wp-count">
           航點數:<b>{waypoints.length}</b>

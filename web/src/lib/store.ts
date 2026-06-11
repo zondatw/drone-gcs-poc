@@ -59,6 +59,8 @@ interface State {
   setActiveIndex: (i: number) => void
   setFollow: (v: boolean) => void
 
+  setWaypoints: (i: number, waypoints: Waypoint[]) => void // 覆寫指定第 i 台(群組亂數用)
+
   // 以下都作用在 activeIndex 那台:
   resetTrail: () => void
   addWaypoint: (w: Waypoint) => void
@@ -104,6 +106,8 @@ export const useStore = create<State>((set) => ({
   setActiveIndex: (activeIndex) => set({ activeIndex }),
   setFollow: (follow) => set({ follow }),
 
+  setWaypoints: (i, waypoints) =>
+    set((s) => ({ drones: s.drones.map((d, j) => (j === i ? { ...d, waypoints } : d)) })),
   resetTrail: () => set((s) => updateActive(s, (d) => ({ ...d, trail: [] }))),
   addWaypoint: (w) => set((s) => updateActive(s, (d) => ({ ...d, waypoints: [...d.waypoints, w] }))),
   moveWaypoint: (i, w) =>

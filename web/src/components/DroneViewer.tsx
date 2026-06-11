@@ -186,6 +186,28 @@ export function DroneViewer() {
         )
       })}
 
+      {/* 其它台的航線:各自顏色(細實線 + 小點),讓「每台不同航線」一眼看到 */}
+      {drones.map((d, i) => {
+        if (i === activeIndex || d.waypoints.length < 2) return null
+        const positions = Cesium.Cartesian3.fromDegreesArrayHeights(
+          d.waypoints.flatMap((w) => [w.lon, w.lat, d.missionAlt]),
+        )
+        return (
+          <Entity key={`route-${i}`}>
+            <PolylineGraphics positions={positions} width={2} material={cz(i).withAlpha(0.85)} />
+          </Entity>
+        )
+      })}
+      {drones.flatMap((d, i) =>
+        i === activeIndex
+          ? []
+          : d.waypoints.map((w, j) => (
+              <Entity key={`owp-${i}-${j}`} position={Cesium.Cartesian3.fromDegrees(w.lon, w.lat, d.missionAlt)}>
+                <PointGraphics pixelSize={7} color={cz(i)} outlineColor={Cesium.Color.BLACK} outlineWidth={1} />
+              </Entity>
+            )),
+      )}
+
       {/* active 那台的預定航線(黃色虛線)*/}
       {routePositions.length > 0 && (
         <Entity>
