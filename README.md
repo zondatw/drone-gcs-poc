@@ -2,8 +2,15 @@
 
 PX4 SITL + MAVSDK PoC, running on Apple Silicon Mac with Docker Desktop.
 
-- **第 1 關** — [telemetry.py](telemetry.py):連上 mavsdk_server,把遙測印在 console。
-- **第 2 關** — [server.py](server.py) + [web/](web/):飛行控制 + Cesium 3D 即時地圖（見下方）。
+- **第 1 關** — [server/telemetry.py](server/telemetry.py):連上 mavsdk_server,把遙測印在 console。
+- **第 2 關** — [server/server.py](server/server.py) + [web/](web/):飛行控制 + Cesium 3D 即時地圖（見下方）。
+
+```
+drone/
+  server/   ← Python 後端 (server.py, telemetry.py, pyproject.toml) — 在這裡跑 uv
+  web/      ← React + Cesium 前端
+  docker-compose.yaml
+```
 
 ## Why not run mavsdk_server on the Mac host?
 
@@ -23,7 +30,7 @@ so packets sent from a container to `host.docker.internal` are silently dropped.
     mavsdk_server  udpin://0.0.0.0:14540  →  gRPC :50051
         │  gRPC (localhost:50051, exposed to host)
         ▼
-[ Mac host ]  telemetry.py (第1關)  或  server.py + web/ (第2關)
+[ Mac host ]  server/telemetry.py (第1關)  或  server/server.py + web/ (第2關)
 ```
 
 容器只提供 PX4 + mavsdk_server,Python 客戶端一律跑在 Mac host —— 這樣
@@ -32,11 +39,11 @@ mavsdk_server 只有**一個** gRPC 客戶端;兩個客戶端會讓 arm/takeoff 
 ## Run
 
 ```sh
-docker compose up              # PX4 + mavsdk_server,等 GPS lock (~30s)
-uv run python telemetry.py     # 第 1 關: 在 host 印遙測
+docker compose up                       # PX4 + mavsdk_server,等 GPS lock (~30s)
+cd server && uv run python telemetry.py  # 第 1 關: 在 host 印遙測
 ```
 
-`uv run python telemetry.py` 連到容器內已對外的 gRPC 50051,印出位置/電量/模式。
+`uv` 指令都要在 `server/` 底下跑（pyproject.toml 在那裡）。連到容器內已對外的 gRPC 50051,印出位置/電量/模式。
 
 ## Cached binaries
 
@@ -59,22 +66,22 @@ docker compose down
 
 ## 第 2 關:飛行控制 + Cesium 3D 即時地圖
 
-讓無人機飛、並用 3D 地球即時看它在哪。後端 [server.py](server.py) 沿用上面的
+讓無人機飛、並用 3D 地球即時看它在哪。後端 [server/server.py](server/server.py) 沿用上面的
 mavsdk_server gRPC 連線,再對前端開遙測 / 控制介面;前端 [web/](web/) 是
 React + Vite + CesiumJS(resium)。
 
 ```
-mavsdk_server :50051 ──gRPC──> server.py :8000 ──WS/REST──> web/ (Cesium) :5173
+mavsdk_server :50051 ──gRPC──> server/server.py :8000 ──WS/REST──> web/ (Cesium) :5173
 ```
 
 ### 跑起來(三個終端機)
 
 ```sh
 # 1) PX4 + mavsdk_server(同上)
-docker compose up            # 等 PX4 取得 GPS lock(~30s)
+docker compose up                       # 等 PX4 取得 GPS lock(~30s)
 
-# 2) 後端(在 Mac host;gRPC 50051 已對外)
-uv run uvicorn server:app --reload
+# 2) 後端(在 server/ 底下;gRPC 50051 已對外)
+cd server && uv run uvicorn server:app --reload
 
 # 3) 前端
 cd web && npm install        # 第一次才需要

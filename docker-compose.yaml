@@ -34,7 +34,7 @@ services:
     network_mode: "service:px4-sitl"
     working_dir: /app
     volumes:
-      - ./:/app
+      - ./server:/app
     command:
       - sh
       - -c
