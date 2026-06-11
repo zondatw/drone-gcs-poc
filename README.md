@@ -1,5 +1,7 @@
 # drone PoC
 
+![demo](./readme_pictures/demo.png)  
+
 PX4 SITL + MAVSDK PoC, running on Apple Silicon Mac with Docker Desktop.
 
 - **第 1 關** — [server/telemetry.py](server/telemetry.py):連上 mavsdk_server,把遙測印在 console。
