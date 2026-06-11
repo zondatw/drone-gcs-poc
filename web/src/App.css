@@ -1,0 +1,96 @@
+.app {
+  position: fixed;
+  inset: 0;
+  font-family: system-ui, -apple-system, "PingFang TC", sans-serif;
+  color: #e8eef5;
+}
+
+/* Cesium viewer 撐滿 */
+.cesium-viewer {
+  position: absolute;
+  inset: 0;
+}
+
+/* ── 左上 HUD ── */
+.hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  min-width: 190px;
+  padding: 12px 14px;
+  background: rgba(12, 18, 28, 0.78);
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+}
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 0;
+}
+.hud-label { color: #93a7bd; }
+.hud-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.dot.ok { background: #36d399; }
+.dot.bad { background: #f87272; }
+
+/* ── 右上 控制面板 ── */
+.panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  width: 220px;
+  padding: 14px;
+  background: rgba(12, 18, 28, 0.78);
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+.panel-title { font-weight: 700; margin-bottom: 10px; }
+.btn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+button {
+  padding: 8px 6px;
+  font-size: 13px;
+  color: #e8eef5;
+  background: #1f2d3d;
+  border: 1px solid rgba(120, 160, 200, 0.3);
+  border-radius: 7px;
+  cursor: pointer;
+}
+button:hover { background: #2a3d52; }
+button.wide { width: 100%; margin-top: 8px; }
+button.active { background: #1a6b4a; border-color: #36d399; }
+button.ghost { background: transparent; }
+.hint {
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: rgba(54, 211, 153, 0.12);
+  border-radius: 6px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.tip {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #93a7bd;
+  line-height: 1.4;
+}

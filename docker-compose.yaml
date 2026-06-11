@@ -1,4 +1,4 @@
-# PX4 SITL + MAVSDK companion
+# PX4 SITL + mavsdk_server
 #
 # Problem: Docker Desktop for Mac only proxies TCP through host.docker.internal —
 # UDP (MAVLink) sent from a container to the host is silently dropped.
@@ -7,9 +7,15 @@
 # patches MAVLink to stay on localhost. The companion container shares px4-sitl's
 # network namespace and receives the MAVLink there.
 #
+# Design: the container only provides infra (PX4 + mavsdk_server). The Python
+# client runs on the Mac host as the *single* gRPC client (gRPC :50051 exposed).
+# Two clients on one mavsdk_server makes command ACKs (arm/takeoff) time out,
+# so we deliberately don't run any Python client inside the container.
+#
 # Usage:
-#   docker compose up            ← runs everything; telemetry printed to stdout
-#   uv run python telemetry.py   ← optional: run Python on host instead (needs port 50051)
+#   docker compose up            ← PX4 + mavsdk_server (gRPC :50051)
+#   uv run python telemetry.py   ← 第 1 關: 印遙測
+#   uv run uvicorn server:app    ← 第 2 關: 飛行控制 + Web (見 README)
 #
 # Stop: Ctrl-C / docker compose down
 
@@ -34,19 +40,14 @@ services:
       - -c
       - |
         set -e
-        echo '>>> [1/4] 安裝 mavsdk ...'
-        pip install --root-user-action=ignore mavsdk
         BIN=/app/.mavsdk_server_linux
         if [ ! -x "$$BIN" ]; then
-          echo '>>> [2/4] 下載 mavsdk_server v3.15.0 (linux-arm64-musl) ...'
+          echo '>>> 下載 mavsdk_server v3.15.0 (linux-arm64-musl) ...'
           python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/mavlink/MAVSDK/releases/download/v3.15.0/mavsdk_server_linux-arm64-musl','$$BIN')"
           chmod +x "$$BIN"
         else
-          echo '>>> [2/4] 已有快取的 mavsdk_server,略過下載'
+          echo '>>> 已有快取的 mavsdk_server,略過下載'
         fi
-        echo '>>> [3/4] 背景啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
-        "$$BIN" udpin://0.0.0.0:14540 -p 50051 &
-        sleep 4
-        echo '>>> [4/4] 啟動 Python client ...'
-        python telemetry.py
+        echo '>>> 啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
+        exec "$$BIN" udpin://0.0.0.0:14540 -p 50051
     restart: "no"
