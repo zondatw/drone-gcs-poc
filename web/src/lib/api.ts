@@ -26,4 +26,10 @@ export const api = {
   missionStart: (i: number) => post(`${base(i)}/mission/start`),
   missionPause: (i: number) => post(`${base(i)}/mission/pause`),
   missionClear: (i: number) => post(`${base(i)}/mission/clear`),
+
+  // 群組指令:一次對全部 drone
+  allArm: () => post('/api/all/arm'),
+  allTakeoff: (alt = 10) => post('/api/all/takeoff', { alt }),
+  allLand: () => post('/api/all/land'),
+  allRtl: () => post('/api/all/rtl'),
 }

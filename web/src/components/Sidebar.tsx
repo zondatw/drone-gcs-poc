@@ -88,6 +88,17 @@ export function Sidebar() {
         ))}
       </div>
 
+      {/* ── 群組指令:一次對全部 ── */}
+      <section className="card">
+        <h3>群組指令 · 全部 {drones.length} 機</h3>
+        <div className="btn-grid">
+          <button onClick={() => api.allArm()}>全部 Arm</button>
+          <button className="primary" onClick={() => api.allTakeoff()}>全部起飛</button>
+          <button onClick={() => api.allLand()}>全部降落</button>
+          <button onClick={() => api.allRtl()}>全部返航</button>
+        </div>
+      </section>
+
       {/* ── 連線 + 遙測 (active) ── */}
       <section className="card">
         <div className="conn">

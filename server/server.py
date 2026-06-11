@@ -392,6 +392,37 @@ async def api_mission_clear(i: int):
     return await a.mission_clear() if a else NOT_FOUND
 
 
+# ── 群組指令:一次對全部 drone 下令(並行)─────────────────────────────────
+async def _fanout(action) -> dict:
+    results = await asyncio.gather(
+        *(action(a) for a in agents), return_exceptions=True
+    )
+    return {"results": [
+        r if not isinstance(r, Exception) else {"ok": False, "error": str(r)}
+        for r in results
+    ]}
+
+
+@app.post("/api/all/arm")
+async def api_all_arm():
+    return await _fanout(lambda a: a.arm())
+
+
+@app.post("/api/all/takeoff")
+async def api_all_takeoff(body: TakeoffBody):
+    return await _fanout(lambda a: a.takeoff(body.alt))
+
+
+@app.post("/api/all/land")
+async def api_all_land():
+    return await _fanout(lambda a: a.land())
+
+
+@app.post("/api/all/rtl")
+async def api_all_rtl():
+    return await _fanout(lambda a: a.rtl())
+
+
 @app.get("/api/state")
 async def api_state():
     return {"drones": [a.snapshot() for a in agents]}
