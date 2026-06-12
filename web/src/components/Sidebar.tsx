@@ -63,7 +63,10 @@ export function Sidebar() {
     const r = await api.missionUpload(activeIndex, waypoints, missionAlt, missionSpeed)
     if (!r.ok) alert('上傳失敗: ' + r.error)
   }
+  // ▶ 開始任務:有航線才會 enable;一鍵 upload+start(跟「全部開始任務」一致)。
   const startMission = async () => {
+    if (!waypoints.length) return
+    await api.missionUpload(activeIndex, waypoints, missionAlt, missionSpeed)
     const r = await api.missionStart(activeIndex)
     if (!r.ok && !String(r.error).includes('TIMEOUT')) alert('開始任務失敗: ' + r.error)
   }
@@ -96,6 +99,20 @@ export function Sidebar() {
   const missionActive = t?.mission_total != null && t.mission_total > 0
   const missionAt = t?.mission_current == null || t.mission_current < 0 ? 0 : t.mission_current
 
+  // ── 按鈕前置條件(用可靠的遙測;flight_mode 可靠,mission_total 不可靠不用)──
+  const isAirborne = (d: DroneClient) => (d.telemetry.rel_alt ?? 0) > 1.5
+  const isRunning = (d: DroneClient) => /MISSION|TAKEOFF/.test(d.telemetry.flight_mode ?? '')
+  const conn = connected && !!t?.connected
+  const armed = !!t?.armed
+  const airborne = active ? isAirborne(active) : false
+  const running = active ? isRunning(active) : false
+  const hasRoute = waypoints.length > 0
+  // 群組聚合
+  const anyRoute = drones.some((d) => d.waypoints.length > 0)
+  const anyAirborne = drones.some(isAirborne)
+  const anyGround = drones.some((d) => !isAirborne(d))
+  const anyRunning = drones.some(isRunning)
+
   return (
     <aside className="sidebar">
       <div className="brand">🛩 Drone GCS · {drones.length} 機</div>
@@ -122,20 +139,25 @@ export function Sidebar() {
       <section className="card">
         <h3>群組指令 · 全部 {drones.length} 機</h3>
         <div className="btn-grid">
-          <button onClick={() => api.allArm()}>全部 Arm</button>
-          <button className="primary" onClick={() => api.allTakeoff()}>全部起飛</button>
-          <button onClick={() => api.allLand()}>全部降落</button>
-          <button onClick={() => api.allRtl()}>全部返航</button>
+          <button onClick={() => api.allArm()} disabled={!connected}>全部 Arm</button>
+          <button className="primary" onClick={() => api.allTakeoff()} disabled={!anyGround}
+            title={!anyGround ? '都已在空中' : ''}>全部起飛</button>
+          <button onClick={() => api.allLand()} disabled={!anyAirborne}
+            title={!anyAirborne ? '都在地面' : ''}>全部降落</button>
+          <button onClick={() => api.allRtl()} disabled={!anyAirborne}
+            title={!anyAirborne ? '都在地面' : ''}>全部返航</button>
         </div>
       </section>
 
       {/* ── 群組任務:亂數航線 + 全部一起跑 ── */}
       <section className="card">
         <h3>群組任務 · 每台各飛各的</h3>
-        <button className="wide" onClick={randomAll}>🎲 全部亂數航線</button>
+        <button className="wide" onClick={randomAll} disabled={!connected}>🎲 全部亂數航線</button>
         <div className="btn-grid" style={{ marginTop: 8 }}>
-          <button className="primary" onClick={startAll}>▶ 全部開始任務</button>
-          <button onClick={pauseAll}>‖ 全部暫停</button>
+          <button className="primary" onClick={startAll} disabled={!anyRoute}
+            title={!anyRoute ? '先產生航線(🎲 全部亂數航線)' : ''}>▶ 全部開始任務</button>
+          <button onClick={pauseAll} disabled={!anyRunning}
+            title={!anyRunning ? '沒有任務在執行' : ''}>‖ 全部暫停</button>
         </div>
       </section>
 
@@ -169,12 +191,16 @@ export function Sidebar() {
       <section className="card">
         <h3>飛行控制 · D{activeIndex + 1}</h3>
         <div className="btn-grid">
-          <button onClick={() => api.arm(activeIndex)}>Arm 解鎖</button>
-          <button onClick={() => api.takeoff(activeIndex)}>起飛</button>
-          <button onClick={() => api.land(activeIndex)}>降落</button>
-          <button onClick={() => api.rtl(activeIndex)}>返航 RTL</button>
+          <button onClick={() => api.arm(activeIndex)} disabled={!conn || armed}
+            title={armed ? '已解鎖' : !conn ? '等待連線' : ''}>Arm 解鎖</button>
+          <button onClick={() => api.takeoff(activeIndex)} disabled={!conn || airborne}
+            title={airborne ? '已在空中' : !conn ? '等待連線' : ''}>起飛</button>
+          <button onClick={() => api.land(activeIndex)} disabled={!conn || !airborne}
+            title={!airborne ? '在地面,先起飛' : ''}>降落</button>
+          <button onClick={() => api.rtl(activeIndex)} disabled={!conn || !airborne}
+            title={!airborne ? '在地面,先起飛' : ''}>返航 RTL</button>
         </div>
-        <button className={offboardActive ? 'wide active' : 'wide'} onClick={toggleOffboard}>
+        <button className={offboardActive ? 'wide active' : 'wide'} onClick={toggleOffboard} disabled={!conn}>
           {offboardActive ? '■ 停止手動操控' : '▶ 手動操控 (Offboard)'}
         </button>
         {offboardActive && (
@@ -202,7 +228,7 @@ export function Sidebar() {
           </label>
         </div>
 
-        <button className="wide" onClick={randomActive}>🎲 亂數航線</button>
+        <button className="wide" onClick={randomActive} disabled={!conn}>🎲 亂數航線</button>
 
         <div className="wp-count">
           航點數:<b>{waypoints.length}</b>
@@ -226,15 +252,18 @@ export function Sidebar() {
         )}
 
         <div className="btn-grid">
-          <button onClick={uploadMission} disabled={!waypoints.length}>上傳航線</button>
-          <button className="primary" onClick={startMission}>▶ 開始任務</button>
-          <button onClick={() => api.missionPause(activeIndex)}>‖ 暫停</button>
-          <button onClick={() => api.missionClear(activeIndex)}>清除任務</button>
+          <button onClick={uploadMission} disabled={!hasRoute}
+            title={!hasRoute ? '先規劃航線(🎲 或點地圖)' : ''}>上傳航線</button>
+          <button className="primary" onClick={startMission} disabled={!hasRoute}
+            title={!hasRoute ? '先規劃航線(🎲 或點地圖)' : ''}>▶ 開始任務</button>
+          <button onClick={() => api.missionPause(activeIndex)} disabled={!running}
+            title={!running ? '沒有任務在執行' : ''}>‖ 暫停</button>
+          <button onClick={() => api.missionClear(activeIndex)} disabled={!hasRoute && !running}>清除任務</button>
         </div>
 
-        {missionActive && (
+        {running && (
           <div className="mission-prog">
-            任務進度:第 <b>{missionAt}</b> / {t!.mission_total} 航點
+            ● 任務執行中{missionActive ? `:第 ${missionAt} / ${t!.mission_total} 航點` : ''}
           </div>
         )}
       </section>
