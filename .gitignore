@@ -12,3 +12,6 @@ wheels/
 # mavsdk_server binaries (downloaded at runtime)
 .mavsdk_server
 .mavsdk_server_linux
+
+# mac
+.DS_Store

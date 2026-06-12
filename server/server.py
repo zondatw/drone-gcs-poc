@@ -73,7 +73,7 @@ class DroneAgent:
             "id": index,
             "lat": None, "lon": None,
             "abs_alt": None, "rel_alt": None, "ground_alt": None,
-            "heading": None, "ground_speed": None, "vd": None,
+            "heading": None, "ground_speed": None, "vd": None, "vn": None, "ve": None,
             "battery_pct": None, "flight_mode": None, "armed": None,
             "mission_current": None, "mission_total": None,
             "connected": False,
@@ -119,6 +119,8 @@ class DroneAgent:
 
     async def _watch_velocity(self) -> None:
         async for v in self.system.telemetry.velocity_ned():
+            self.latest["vn"] = v.north_m_s
+            self.latest["ve"] = v.east_m_s
             self.latest["ground_speed"] = (v.north_m_s ** 2 + v.east_m_s ** 2) ** 0.5
             self.latest["vd"] = v.down_m_s
 
@@ -197,14 +199,46 @@ class DroneAgent:
             _make_item(w.lat, w.lon, w.alt if w.alt is not None else alt, speed)
             for w in waypoints
         ]
+        plan = MissionPlan(items)
         await cmd(self.system.mission.clear_mission())
-        return {**await cmd(self.system.mission.upload_mission(MissionPlan(items))),
-                "count": len(items)}
+        # 上傳偶爾 ACK timeout,重試到成功(SITL 高負載常見)。
+        res = {"ok": False, "error": "上傳失敗"}
+        for _ in range(3):
+            res = await cmd(self.system.mission.upload_mission(plan))
+            if res.get("ok"):
+                break
+            await asyncio.sleep(0.3)
+        return {**res, "count": len(items)}
 
     async def mission_start(self):
-        with contextlib.suppress(Exception):
-            await self.system.action.arm()
-        return await cmd(self.system.mission.start_mission())
+        """穩健版:確認 armed → start_mission,並用 flight_mode 遙測確認真的進 MISSION,沒進就重試。
+
+        PX4 SITL 多機高負載下,arm / start_mission 常 ACK timeout 但指令未必有生效;
+        只發一次就放棄會造成「那台不動」。這裡改成重試 + 遙測驗證。
+        """
+        # 1) 確保 armed。PX4 落地/高負載後預檢(health)會「暫時」失敗 → Arming denied,
+        #    通常幾秒就恢復,所以這裡耐心重試 ~10s(遙測顯示 armed 才往下)。
+        for _ in range(20):
+            if self.latest.get("armed"):
+                break
+            with contextlib.suppress(Exception):
+                await self.system.action.arm()
+            await asyncio.sleep(0.5)
+        if not self.latest.get("armed"):
+            return {"ok": False, "error": "無法解鎖(預檢未通過,GPS/健康檢查?)"}
+
+        # 2) start_mission,並等 flight_mode 進 MISSION(從地面起飛會先經過 TAKEOFF,
+        #    兩者都算「任務已啟動」——不然會在起飛階段誤判而重發 start_mission 打斷任務)。
+        #    只有真的還停在 HOLD/原狀態才重發(處理 timeout 但完全沒生效)。
+        last = {"ok": False, "error": "未啟動任務"}
+        for _ in range(3):
+            last = await cmd(self.system.mission.start_mission())
+            for _ in range(16):  # 等 ~4s
+                await asyncio.sleep(0.25)
+                fm = self.latest.get("flight_mode") or ""
+                if "MISSION" in fm or "TAKEOFF" in fm:
+                    return {"ok": True}
+        return last
 
     async def mission_pause(self):
         return await cmd(self.system.mission.pause_mission())
