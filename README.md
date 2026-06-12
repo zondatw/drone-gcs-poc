@@ -177,3 +177,10 @@ cd web && npm run dev
 
 每個 PX4 SITL 是獨立模擬、彼此不在同一世界,所以航線重疊也不會真的相撞。任務在多機高負載下偶爾某台 start
 會 ACK timeout(再按一次即可)。
+
+### 無人機圖示 + 螺旋槳動畫
+地圖上每台不是色點,而是**自繪的俯視四旋翼圖示**([web/src/lib/droneIcon.ts](web/src/lib/droneIcon.ts)):
+機身用該台顏色、四個旋翼的葉片預生多格角度循環切換做**螺旋槳轉動動畫**,機首白色三角會指向**飛行方向**
+(移動中用航跡 velocity、懸停時用機頭 yaw)。用 Cesium `BillboardGraphics` + canvas 繪製,零外部模型檔、
+授權乾淨(自製)。機首方向是把世界座標的方位向量設成 billboard 的 `alignedAxis`,所以不管鏡頭怎麼轉都對齊真實方位
+(後端 `/ws/telemetry` 多送 `vn/ve` 北東向速度分量供前端算航跡)。動畫在真實瀏覽器持續轉。
