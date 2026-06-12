@@ -1,9 +1,10 @@
 import { useEffect, useMemo } from 'react'
 import {
-  Viewer, Entity, PointGraphics, LabelGraphics, PolylineGraphics, useCesium,
+  Viewer, Entity, PointGraphics, BillboardGraphics, LabelGraphics, PolylineGraphics, useCesium,
 } from 'resium'
 import * as Cesium from 'cesium'
 import { useStore, type Waypoint } from '../lib/store'
+import { droneFrame } from '../lib/droneIcon'
 
 // 起飛點 (PX4 SITL 預設,蘇黎世)。
 const HOME_LON = 8.5456
@@ -163,13 +164,25 @@ export function DroneViewer() {
         const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.rel_alt ?? 0)
         const isActive = i === activeIndex
         const trail = d.trail.length >= 6 ? Cesium.Cartesian3.fromDegreesArrayHeights(d.trail) : []
+        // 機首對齊「飛行方向」:移動中用航跡(velocity),否則用機頭 yaw。
+        // 把 ENU 方位向量轉成世界座標,當 billboard 的 alignedAxis → 不管鏡頭怎麼轉都對齊真實方位。
+        const useVel = (t.ground_speed ?? 0) > 0.6 && t.vn != null && t.ve != null
+        const east = useVel ? t.ve! : Math.sin(Cesium.Math.toRadians(t.heading ?? 0))
+        const north = useVel ? t.vn! : Math.cos(Cesium.Math.toRadians(t.heading ?? 0))
+        const headingAxis = Cesium.Matrix4.multiplyByPointAsVector(
+          Cesium.Transforms.eastNorthUpToFixedFrame(pos),
+          new Cesium.Cartesian3(east, north, 0),
+          new Cesium.Cartesian3(),
+        )
+        Cesium.Cartesian3.normalize(headingAxis, headingAxis)
         return (
           <Entity key={`drone-${i}`} id={`drone-${i}`} position={pos} viewFrom={VIEW_FROM}>
-            <PointGraphics
-              pixelSize={isActive ? 17 : 12}
-              color={cz(i)}
-              outlineColor={isActive ? Cesium.Color.WHITE : Cesium.Color.BLACK}
-              outlineWidth={isActive ? 3 : 2}
+            {/* 俯視四旋翼圖示:image 每幀切換做螺旋槳動畫;alignedAxis=世界方位向量 → 機首對齊飛行方向 */}
+            <BillboardGraphics
+              image={new Cesium.CallbackProperty(() => droneFrame(droneColor(i)), false)}
+              alignedAxis={headingAxis}
+              scale={isActive ? 0.62 : 0.46}
+              disableDepthTestDistance={Number.POSITIVE_INFINITY}
             />
             <LabelGraphics
               text={`D${i + 1}`}

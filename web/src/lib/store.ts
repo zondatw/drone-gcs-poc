@@ -11,6 +11,8 @@ export interface Telemetry {
   heading: number | null
   ground_speed: number | null
   vd: number | null
+  vn: number | null
+  ve: number | null
   battery_pct: number | null
   flight_mode: string | null
   armed: boolean | null
@@ -21,7 +23,7 @@ export interface Telemetry {
 
 const EMPTY: Telemetry = {
   id: null, lat: null, lon: null, abs_alt: null, rel_alt: null, ground_alt: null,
-  heading: null, ground_speed: null, vd: null,
+  heading: null, ground_speed: null, vd: null, vn: null, ve: null,
   battery_pct: null, flight_mode: null, armed: null,
   mission_current: null, mission_total: null, connected: null,
 }

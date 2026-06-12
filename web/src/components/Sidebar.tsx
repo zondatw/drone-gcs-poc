@@ -74,13 +74,17 @@ export function Sidebar() {
   // 🎲 全部亂數航線:每台各生一條(繞自己的中心)。
   const randomAll = () => drones.forEach((d, i) => setWaypoints(i, randomRoute(...centerOf(d, i))))
 
-  // ▶ 全部開始任務:每台有航點才上傳→開始(各台並行,單台內有序)。
-  const startAll = () =>
-    Promise.all(drones.map(async (d, i) => {
-      if (!d.waypoints.length) return
+  // ▶ 全部開始任務:每台有航點才上傳→開始(各台並行,單台內有序);回報哪幾台沒成功。
+  const startAll = async () => {
+    const targets = drones.map((d, i) => ({ d, i })).filter((x) => x.d.waypoints.length)
+    if (!targets.length) return alert('沒有任何航線,先按「🎲 全部亂數航線」或在地圖上點航點')
+    const results = await Promise.all(targets.map(async ({ d, i }) => {
       await api.missionUpload(i, d.waypoints, d.missionAlt, d.missionSpeed)
-      await api.missionStart(i)
+      return { i, r: await api.missionStart(i) }
     }))
+    const failed = results.filter((x) => !x.r.ok).map((x) => `D${x.i + 1}`)
+    if (failed.length) alert(`這些沒能開始: ${failed.join(', ')}(可再按一次)`)
+  }
 
   // ‖ 全部暫停任務。
   const pauseAll = () => Promise.all(drones.map((_, i) => api.missionPause(i)))
