@@ -184,3 +184,21 @@ cd web && npm run dev
 (移動中用航跡 velocity、懸停時用機頭 yaw)。用 Cesium `BillboardGraphics` + canvas 繪製,零外部模型檔、
 授權乾淨(自製)。機首方向是把世界座標的方位向量設成 billboard 的 `alignedAxis`,所以不管鏡頭怎麼轉都對齊真實方位
 (後端 `/ws/telemetry` 多送 `vn/ve` 北東向速度分量供前端算航跡)。動畫在真實瀏覽器持續轉。
+
+## 測試
+
+不需要真的無人機 —— 後端把 mavsdk 的 `System` mock 掉,前端只測純邏輯。
+
+```sh
+# 後端(pytest;cmd/MissionItem/goto 換算/mission 重試/端點 routing+bounds/群組 fan-out)
+cd server && uv run pytest -q
+
+# 前端(vitest;randomRoute、store 的航點操作/軌跡累積/toasts)
+cd web && npm test
+```
+
+- 後端 [server/tests/test_server.py](server/tests/test_server.py):用 `unittest.mock` 把 `agent.system`
+  換成 mock,連 `mission_start` 的「arm 重試 + 用 flight_mode 驗證(MISSION/TAKEOFF)」都有測;
+  端點用 FastAPI `TestClient`(不跑 lifespan,不連線)。
+- 前端 [web/src/lib/*.test.ts](web/src/lib):`vitest.config.ts` 用 node 環境、不載 cesium plugin,
+  透過 `useStore.getState()` 測 store。

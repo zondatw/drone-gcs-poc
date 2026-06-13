@@ -9,3 +9,19 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+# 靜音 Starlette TestClient 對 httpx 的內部棄用警告(非本專案程式)。
+filterwarnings = [
+    "ignore:Using .httpx. with .starlette.testclient.",
+]
