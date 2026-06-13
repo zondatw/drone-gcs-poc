@@ -6,6 +6,40 @@
   color: #e8eef5;
 }
 
+/* 指令送出回饋 toast(右下角堆疊)*/
+.toaster {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  cursor: pointer;
+  max-width: 360px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #e8eef5;
+  background: rgba(18, 24, 34, 0.95);
+  border: 1px solid rgba(120, 160, 200, 0.3);
+  border-left-width: 4px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.18s ease-out;
+}
+.toast.ok { border-left-color: #36d399; }
+.toast.warn { border-left-color: #fbbd23; }
+.toast.err { border-left-color: #f87272; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* 地圖佔滿剩餘空間,Cesium viewer 填滿這個容器 */
 .map {
   position: relative;

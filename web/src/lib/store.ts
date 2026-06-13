@@ -33,6 +33,15 @@ export interface Waypoint {
   lon: number
 }
 
+// 指令送出回饋用的 toast。
+export type ToastKind = 'ok' | 'warn' | 'err'
+export interface Toast {
+  id: number
+  text: string
+  kind: ToastKind
+}
+let toastSeq = 0
+
 // 每台無人機在前端的狀態(遙測 + 自己的軌跡/航線/任務設定)。
 export interface DroneClient {
   telemetry: Telemetry
@@ -55,11 +64,14 @@ interface State {
   activeIndex: number // 目前控制中的那台
   connected: boolean // 遙測 WS 是否連上
   follow: boolean
+  toasts: Toast[] // 指令送出回饋
 
   setTelemetry: (payload: { drones: Telemetry[] }) => void
   setConnected: (c: boolean) => void
   setActiveIndex: (i: number) => void
   setFollow: (v: boolean) => void
+  pushToast: (text: string, kind: ToastKind) => void
+  dismissToast: (id: number) => void
 
   setWaypoints: (i: number, waypoints: Waypoint[]) => void // 覆寫指定第 i 台(群組亂數用)
 
@@ -86,6 +98,11 @@ export const useStore = create<State>((set) => ({
   activeIndex: 0,
   connected: false,
   follow: true,
+  toasts: [],
+
+  pushToast: (text, kind) =>
+    set((s) => ({ toasts: [...s.toasts, { id: ++toastSeq, text, kind }] })),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
   setTelemetry: ({ drones: ts }) =>
     set((s) => ({

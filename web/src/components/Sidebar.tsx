@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useStore, type DroneClient } from '../lib/store'
 import { api } from '../lib/api'
 import { randomRoute } from '../lib/route'
@@ -29,8 +30,45 @@ export function Sidebar() {
   const insertWaypoint = useStore((s) => s.insertWaypoint)
   const removeWaypoint = useStore((s) => s.removeWaypoint)
   const setWaypoints = useStore((s) => s.setWaypoints)
+  const pushToast = useStore((s) => s.pushToast)
 
   useKeyboardControl()
+
+  // 指令送出回饋:送出時把 key 標 pending(disable 防連點)→ 依後端回應(= mavsdk ACK)跳 toast。
+  // PX4 SITL 常見 TIMEOUT 但其實有執行 → 標成「已送出,等狀態確認」(真正生效看遙測/儀表板)。
+  const [pending, setPending] = useState<Set<string>>(new Set())
+  const setPend = (key: string, on: boolean) =>
+    setPending((p) => {
+      const n = new Set(p)
+      if (on) n.add(key)
+      else n.delete(key)
+      return n
+    })
+  const runCmd = async (key: string, label: string, fn: () => Promise<unknown>): Promise<unknown> => {
+    setPend(key, true)
+    try {
+      const r = (await fn()) as { ok?: boolean; error?: string; results?: { ok?: boolean }[] }
+      if (r && Array.isArray(r.results)) {
+        const oks = r.results.filter((x) => x?.ok).length
+        const total = r.results.length
+        if (total > 0 && oks === total) pushToast(`✓ ${label}:全部送達 (${total})`, 'ok')
+        else pushToast(`⚠ ${label}:${oks}/${total} 成功`, 'warn')
+      } else if (r?.ok) {
+        pushToast(`✓ ${label} 已送達`, 'ok')
+      } else if (/TIMEOUT/i.test(String(r?.error))) {
+        pushToast(`⚠ ${label} 已送出(等狀態確認)`, 'warn')
+      } else {
+        pushToast(`✗ ${label}:${r?.error ?? '失敗'}`, 'err')
+      }
+      return r
+    } catch {
+      pushToast(`✗ ${label}:連線錯誤`, 'err')
+      return undefined
+    } finally {
+      setPend(key, false)
+    }
+  }
+  const busy = (key: string) => pending.has(key)
 
   const active = drones[activeIndex]
   const t = active?.telemetry
@@ -49,48 +87,46 @@ export function Sidebar() {
 
   const toggleOffboard = async () => {
     if (offboardActive) {
-      await api.offboardStop(activeIndex)
+      await runCmd('offboard', '停止手動操控', () => api.offboardStop(activeIndex))
       setOffboardActive(false)
     } else {
-      const r = await api.offboardStart(activeIndex)
-      if (r.ok) setOffboardActive(true)
-      else alert('Offboard 啟動失敗: ' + r.error)
+      const r = (await runCmd('offboard', '手動操控', () => api.offboardStart(activeIndex))) as { ok?: boolean }
+      if (r?.ok) setOffboardActive(true)
     }
   }
 
-  const uploadMission = async () => {
-    if (!waypoints.length) return alert('先在地圖上點幾個航點')
-    const r = await api.missionUpload(activeIndex, waypoints, missionAlt, missionSpeed)
-    if (!r.ok) alert('上傳失敗: ' + r.error)
-  }
-  // ▶ 開始任務:有航線才會 enable;一鍵 upload+start(跟「全部開始任務」一致)。
-  const startMission = async () => {
-    if (!waypoints.length) return
-    await api.missionUpload(activeIndex, waypoints, missionAlt, missionSpeed)
-    const r = await api.missionStart(activeIndex)
-    if (!r.ok && !String(r.error).includes('TIMEOUT')) alert('開始任務失敗: ' + r.error)
-  }
+  const uploadMission = () =>
+    runCmd('upload', '上傳航線', () => api.missionUpload(activeIndex, waypoints, missionAlt, missionSpeed))
 
-  // 🎲 亂數航線:幫 active 那台生一條。
+  // ▶ 開始任務:有航線才會 enable;一鍵 upload+start(跟「全部開始任務」一致),回報以 start 結果為準。
+  const startMission = () =>
+    runCmd('start', '開始任務', async () => {
+      await api.missionUpload(activeIndex, waypoints, missionAlt, missionSpeed)
+      return api.missionStart(activeIndex)
+    })
+
+  // 🎲 亂數航線:幫 active 那台生一條(純前端,不送 drone,不跳 toast)。
   const randomActive = () => setWaypoints(activeIndex, randomRoute(...centerOf(active, activeIndex)))
 
   // 🎲 全部亂數航線:每台各生一條(繞自己的中心)。
   const randomAll = () => drones.forEach((d, i) => setWaypoints(i, randomRoute(...centerOf(d, i))))
 
-  // ▶ 全部開始任務:每台有航點才上傳→開始(各台並行,單台內有序);回報哪幾台沒成功。
-  const startAll = async () => {
-    const targets = drones.map((d, i) => ({ d, i })).filter((x) => x.d.waypoints.length)
-    if (!targets.length) return alert('沒有任何航線,先按「🎲 全部亂數航線」或在地圖上點航點')
-    const results = await Promise.all(targets.map(async ({ d, i }) => {
-      await api.missionUpload(i, d.waypoints, d.missionAlt, d.missionSpeed)
-      return { i, r: await api.missionStart(i) }
-    }))
-    const failed = results.filter((x) => !x.r.ok).map((x) => `D${x.i + 1}`)
-    if (failed.length) alert(`這些沒能開始: ${failed.join(', ')}(可再按一次)`)
-  }
+  // ▶ 全部開始任務:每台有航點才上傳→開始(各台並行,單台內有序),彙整成 {results} 給 runCmd 回報。
+  const startAll = () =>
+    runCmd('startAll', '全部開始任務', async () => {
+      const targets = drones.map((d, i) => ({ d, i })).filter((x) => x.d.waypoints.length)
+      const results = await Promise.all(targets.map(async ({ d, i }) => {
+        await api.missionUpload(i, d.waypoints, d.missionAlt, d.missionSpeed)
+        return api.missionStart(i)
+      }))
+      return { results }
+    })
 
   // ‖ 全部暫停任務。
-  const pauseAll = () => Promise.all(drones.map((_, i) => api.missionPause(i)))
+  const pauseAll = () =>
+    runCmd('pauseAll', '全部暫停', async () => ({
+      results: await Promise.all(drones.map((_, i) => api.missionPause(i))),
+    }))
 
   const batt = t?.battery_pct ?? null
   const battClass = batt == null ? '' : batt > 50 ? 'ok' : batt > 20 ? 'warn' : 'bad'
@@ -139,12 +175,12 @@ export function Sidebar() {
       <section className="card">
         <h3>群組指令 · 全部 {drones.length} 機</h3>
         <div className="btn-grid">
-          <button onClick={() => api.allArm()} disabled={!connected}>全部 Arm</button>
-          <button className="primary" onClick={() => api.allTakeoff()} disabled={!anyGround}
+          <button onClick={() => runCmd('allArm', '全部 Arm', () => api.allArm())} disabled={!connected || busy('allArm')}>全部 Arm</button>
+          <button className="primary" onClick={() => runCmd('allTakeoff', '全部起飛', () => api.allTakeoff())} disabled={!anyGround || busy('allTakeoff')}
             title={!anyGround ? '都已在空中' : ''}>全部起飛</button>
-          <button onClick={() => api.allLand()} disabled={!anyAirborne}
+          <button onClick={() => runCmd('allLand', '全部降落', () => api.allLand())} disabled={!anyAirborne || busy('allLand')}
             title={!anyAirborne ? '都在地面' : ''}>全部降落</button>
-          <button onClick={() => api.allRtl()} disabled={!anyAirborne}
+          <button onClick={() => runCmd('allRtl', '全部返航', () => api.allRtl())} disabled={!anyAirborne || busy('allRtl')}
             title={!anyAirborne ? '都在地面' : ''}>全部返航</button>
         </div>
       </section>
@@ -154,9 +190,9 @@ export function Sidebar() {
         <h3>群組任務 · 每台各飛各的</h3>
         <button className="wide" onClick={randomAll} disabled={!connected}>🎲 全部亂數航線</button>
         <div className="btn-grid" style={{ marginTop: 8 }}>
-          <button className="primary" onClick={startAll} disabled={!anyRoute}
+          <button className="primary" onClick={startAll} disabled={!anyRoute || busy('startAll')}
             title={!anyRoute ? '先產生航線(🎲 全部亂數航線)' : ''}>▶ 全部開始任務</button>
-          <button onClick={pauseAll} disabled={!anyRunning}
+          <button onClick={pauseAll} disabled={!anyRunning || busy('pauseAll')}
             title={!anyRunning ? '沒有任務在執行' : ''}>‖ 全部暫停</button>
         </div>
       </section>
@@ -191,16 +227,16 @@ export function Sidebar() {
       <section className="card">
         <h3>飛行控制 · D{activeIndex + 1}</h3>
         <div className="btn-grid">
-          <button onClick={() => api.arm(activeIndex)} disabled={!conn || armed}
+          <button onClick={() => runCmd('arm', 'Arm 解鎖', () => api.arm(activeIndex))} disabled={!conn || armed || busy('arm')}
             title={armed ? '已解鎖' : !conn ? '等待連線' : ''}>Arm 解鎖</button>
-          <button onClick={() => api.takeoff(activeIndex)} disabled={!conn || airborne}
+          <button onClick={() => runCmd('takeoff', '起飛', () => api.takeoff(activeIndex))} disabled={!conn || airborne || busy('takeoff')}
             title={airborne ? '已在空中' : !conn ? '等待連線' : ''}>起飛</button>
-          <button onClick={() => api.land(activeIndex)} disabled={!conn || !airborne}
+          <button onClick={() => runCmd('land', '降落', () => api.land(activeIndex))} disabled={!conn || !airborne || busy('land')}
             title={!airborne ? '在地面,先起飛' : ''}>降落</button>
-          <button onClick={() => api.rtl(activeIndex)} disabled={!conn || !airborne}
+          <button onClick={() => runCmd('rtl', '返航 RTL', () => api.rtl(activeIndex))} disabled={!conn || !airborne || busy('rtl')}
             title={!airborne ? '在地面,先起飛' : ''}>返航 RTL</button>
         </div>
-        <button className={offboardActive ? 'wide active' : 'wide'} onClick={toggleOffboard} disabled={!conn}>
+        <button className={offboardActive ? 'wide active' : 'wide'} onClick={toggleOffboard} disabled={!conn || busy('offboard')}>
           {offboardActive ? '■ 停止手動操控' : '▶ 手動操控 (Offboard)'}
         </button>
         {offboardActive && (
@@ -252,13 +288,13 @@ export function Sidebar() {
         )}
 
         <div className="btn-grid">
-          <button onClick={uploadMission} disabled={!hasRoute}
+          <button onClick={uploadMission} disabled={!hasRoute || busy('upload')}
             title={!hasRoute ? '先規劃航線(🎲 或點地圖)' : ''}>上傳航線</button>
-          <button className="primary" onClick={startMission} disabled={!hasRoute}
+          <button className="primary" onClick={startMission} disabled={!hasRoute || busy('start')}
             title={!hasRoute ? '先規劃航線(🎲 或點地圖)' : ''}>▶ 開始任務</button>
-          <button onClick={() => api.missionPause(activeIndex)} disabled={!running}
+          <button onClick={() => runCmd('pause', '暫停', () => api.missionPause(activeIndex))} disabled={!running || busy('pause')}
             title={!running ? '沒有任務在執行' : ''}>‖ 暫停</button>
-          <button onClick={() => api.missionClear(activeIndex)} disabled={!hasRoute && !running}>清除任務</button>
+          <button onClick={() => runCmd('clear', '清除任務', () => api.missionClear(activeIndex))} disabled={(!hasRoute && !running) || busy('clear')}>清除任務</button>
         </div>
 
         {running && (

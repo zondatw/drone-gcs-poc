@@ -1,5 +1,6 @@
 import { DroneViewer } from './components/DroneViewer'
 import { Sidebar } from './components/Sidebar'
+import { Toaster } from './components/Toaster'
 import { useTelemetry } from './hooks/useTelemetry'
 import './App.css'
 
@@ -12,6 +13,7 @@ export default function App() {
       <div className="map">
         <DroneViewer />
       </div>
+      <Toaster />
     </div>
   )
 }
