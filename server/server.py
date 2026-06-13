@@ -31,9 +31,32 @@ from mavsdk.offboard import OffboardError, VelocityBodyYawspeed
 log = logging.getLogger("drone")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-DRONE_COUNT = int(os.environ.get("DRONE_COUNT", "3"))
-BASE_GRPC_PORT = 50051  # drone i → 50051 + i
+BASE_GRPC_PORT = 50051  # 預設 host 模式:drone i → 50051 + i
 DEFAULT_TAKEOFF_ALT_M = 10.0
+
+
+def _parse_targets() -> list[tuple[str, int]]:
+    """每台 drone 的 mavsdk_server (host, port)。
+
+    - 全容器化:設 env MAVSDK_TARGETS="px4-sitl-1:50051,px4-sitl-2:50051,..."
+      (後端容器透過 compose 網路連各 px4-sitl 容器的 gRPC,走 TCP,沒有 UDP proxy 問題)。
+    - host 模式(預設):localhost:50051、50052…(連 compose 對外 expose 的 port)。
+    """
+    raw = os.environ.get("MAVSDK_TARGETS", "").strip()
+    if raw:
+        out = []
+        for item in raw.split(","):
+            item = item.strip()
+            if item:
+                host, _, port = item.rpartition(":")
+                out.append((host, int(port)))
+        return out
+    n = int(os.environ.get("DRONE_COUNT", "3"))
+    return [("localhost", BASE_GRPC_PORT + i) for i in range(n)]
+
+
+TARGETS = _parse_targets()
+DRONE_COUNT = len(TARGETS)
 
 
 async def cmd(coro):
@@ -64,10 +87,11 @@ def _make_item(lat: float, lon: float, alt: float, speed: float) -> MissionItem:
 class DroneAgent:
     """一台無人機:一條 System 連到自己的 mavsdk_server,維護自己的 latest 快照與指令。"""
 
-    def __init__(self, index: int) -> None:
+    def __init__(self, index: int, host: str = "localhost", port: int | None = None) -> None:
         self.index = index
-        self.port = BASE_GRPC_PORT + index
-        self.system = System(mavsdk_server_address="localhost", port=self.port)
+        self.host = host
+        self.port = port if port is not None else BASE_GRPC_PORT + index
+        self.system = System(mavsdk_server_address=host, port=self.port)
         self.offboard_active = False
         self.latest: dict = {
             "id": index,
@@ -85,14 +109,21 @@ class DroneAgent:
     # ── 連線 + 遙測訂閱 ──────────────────────────────────────────────────
     async def connect_and_watch(self) -> None:
         tag = f"[drone {self.index}]"
-        log.info(f">>> {tag} 連線到 mavsdk_server (localhost:{self.port})...")
-        await self.system.connect()
-
-        async for state in self.system.core.connection_state():
-            if state.is_connected:
-                log.info(f">>> {tag} 已連線到 PX4!")
-                self.latest["connected"] = True
+        # mavsdk_server 可能還沒起來(全容器化時),連不上就重試。
+        while True:
+            try:
+                log.info(f">>> {tag} 連線到 mavsdk_server ({self.host}:{self.port})...")
+                await self.system.connect()
+                async for state in self.system.core.connection_state():
+                    if state.is_connected:
+                        log.info(f">>> {tag} 已連線到 PX4!")
+                        self.latest["connected"] = True
+                        break
                 break
+            except Exception as e:  # gRPC 還沒 ready 等
+                self.latest["connected"] = False
+                log.info(f">>> {tag} 連線失敗,5s 後重試: {e}")
+                await asyncio.sleep(5)
 
         async for health in self.system.telemetry.health():
             if health.is_global_position_ok and health.is_home_position_ok:
@@ -248,7 +279,7 @@ class DroneAgent:
 
 
 # ── 全域:N 個 agent + 訂閱者 ─────────────────────────────────────────────
-agents: list[DroneAgent] = [DroneAgent(i) for i in range(DRONE_COUNT)]
+agents: list[DroneAgent] = [DroneAgent(i, host, port) for i, (host, port) in enumerate(TARGETS)]
 subscribers: set[asyncio.Queue] = set()
 
 
@@ -273,7 +304,7 @@ async def _push_loop() -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
-    log.info(f">>> 啟動 {DRONE_COUNT} 台無人機 (gRPC ports {BASE_GRPC_PORT}..{BASE_GRPC_PORT + DRONE_COUNT - 1})")
+    log.info(f">>> 啟動 {DRONE_COUNT} 台無人機 (targets: {['%s:%d' % t for t in TARGETS]})")
     # 每台獨立並行連線/訂閱(某台還沒 GPS 不會 block 其它台),外加一條推播迴圈。
     tasks = [asyncio.create_task(a.connect_and_watch()) for a in agents]
     tasks.append(asyncio.create_task(_push_loop()))

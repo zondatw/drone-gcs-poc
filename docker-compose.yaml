@@ -1,15 +1,22 @@
-# 多機 PX4 SITL + mavsdk_server —— 本檔由 gen_compose.py 產生,別手改。
+# 全容器化多機 GCS —— 本檔由 gen_compose.py 產生,別手改。
 #
 # 每台無人機一組獨立容器(各自 netns):
 #   px4-sitl-{i}  PX4 SITL(PX4_HOME_* 錯開起飛點)→ 對外 gRPC host port 5005{i}
 #   mavsdk-{i}    與 px4-sitl-{i} 共用 netns,跑 mavsdk_server(udpin 14540 → gRPC 50051)
+# 再加上:
+#   backend        FastAPI,連各 px4-sitl-{i}:50051(gRPC/TCP,跨容器 OK)→ :8000
+#   web            nginx serve 前端 build,並 proxy /api、/ws 給 backend → :5173
 #
-# 啟動:
-#   python gen_compose.py 3    # 產生本檔
-#   docker compose up            # 等各台 GPS lock
+# 一鍵全起(前後端 + 無人機):
+#   python gen_compose.py 3
+#   docker compose up --build        # 第一次需 build images;之後 docker compose up
+#   開 http://localhost:5173
+#   (要 Cesium 衛星圖:先 export VITE_CESIUM_ION_TOKEN=你的token 再 build)
+#
+# 只起 infra、前後端改在 host 跑(開發 hot reload):
+#   docker compose up px4-sitl-1 mavsdk-1 [px4-sitl-2 mavsdk-2 ...]
 #   cd server && DRONE_COUNT=3 uv run uvicorn server:app --reload
-#
-# 台數要改:重跑 gen_compose.py 並把 DRONE_COUNT 設成一樣。
+#   cd web && npm run dev
 
 services:
   px4-sitl-1:
@@ -112,4 +119,26 @@ services:
         fi
         echo '>>> 啟動 mavsdk_server (udpin 14540, gRPC 50051) ...'
         exec "$$BIN" udpin://0.0.0.0:14540 -p 50051
+    restart: "no"
+
+  backend:
+    build: ./server
+    depends_on:
+      - mavsdk-1
+      - mavsdk-2
+      - mavsdk-3
+    environment:
+      MAVSDK_TARGETS: "px4-sitl-1:50051,px4-sitl-2:50051,px4-sitl-3:50051"
+    ports:
+      - "8000:8000"
+    restart: "no"
+
+  web:
+    build: ./web
+    depends_on:
+      - backend
+    environment:                       # token 在「啟動時」帶入(不烤進 image)
+      VITE_CESIUM_ION_TOKEN: "${VITE_CESIUM_ION_TOKEN:-}"
+    ports:
+      - "5173:80"
     restart: "no"

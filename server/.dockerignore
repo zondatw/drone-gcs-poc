@@ -1,0 +1,6 @@
+.venv
+.mavsdk_server_linux
+tests
+__pycache__
+*.pyc
+uv.lock

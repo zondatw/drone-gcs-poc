@@ -25,18 +25,25 @@ HOME_ALT = 488.0
 LAT_STEP = 0.0008  # 每台間隔 ~90m
 
 HEADER = """\
-# 多機 PX4 SITL + mavsdk_server —— 本檔由 gen_compose.py 產生,別手改。
+# 全容器化多機 GCS —— 本檔由 gen_compose.py 產生,別手改。
 #
 # 每台無人機一組獨立容器(各自 netns):
 #   px4-sitl-{{i}}  PX4 SITL(PX4_HOME_* 錯開起飛點)→ 對外 gRPC host port 5005{{i}}
 #   mavsdk-{{i}}    與 px4-sitl-{{i}} 共用 netns,跑 mavsdk_server(udpin 14540 → gRPC 50051)
+# 再加上:
+#   backend        FastAPI,連各 px4-sitl-{{i}}:50051(gRPC/TCP,跨容器 OK)→ :8000
+#   web            nginx serve 前端 build,並 proxy /api、/ws 給 backend → :5173
 #
-# 啟動:
-#   python gen_compose.py {n}    # 產生本檔
-#   docker compose up            # 等各台 GPS lock
+# 一鍵全起(前後端 + 無人機):
+#   python gen_compose.py {n}
+#   docker compose up --build        # 第一次需 build images;之後 docker compose up
+#   開 http://localhost:5173
+#   (要 Cesium 衛星圖:先 export VITE_CESIUM_ION_TOKEN=你的token 再 build)
+#
+# 只起 infra、前後端改在 host 跑(開發 hot reload):
+#   docker compose up px4-sitl-1 mavsdk-1 [px4-sitl-2 mavsdk-2 ...]
 #   cd server && DRONE_COUNT={n} uv run uvicorn server:app --reload
-#
-# 台數要改:重跑 gen_compose.py 並把 DRONE_COUNT 設成一樣。
+#   cd web && npm run dev
 """
 
 MAVSDK_CMD = """\
@@ -83,16 +90,42 @@ def service_block(i: int) -> str:
 """
 
 
+def app_block(n: int) -> str:
+    # 後端連各 px4-sitl 容器的 gRPC(內部 port 50051);前端 nginx proxy 給後端。
+    targets = ",".join(f"px4-sitl-{i}:50051" for i in range(1, n + 1))
+    depends = "\n".join(f"      - mavsdk-{i}" for i in range(1, n + 1))
+    return f"""\
+  backend:
+    build: ./server
+    depends_on:
+{depends}
+    environment:
+      MAVSDK_TARGETS: "{targets}"
+    ports:
+      - "8000:8000"
+    restart: "no"
+
+  web:
+    build: ./web
+    depends_on:
+      - backend
+    environment:                       # token 在「啟動時」帶入(不烤進 image)
+      VITE_CESIUM_ION_TOKEN: "${{VITE_CESIUM_ION_TOKEN:-}}"
+    ports:
+      - "5173:80"
+    restart: "no"
+"""
+
+
 def main() -> None:
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     if n < 1:
         sys.exit("台數至少 1")
-    body = "\n".join(service_block(i) for i in range(1, n + 1))
-    out = HEADER.format(n=n) + "\nservices:\n" + body
+    drones = "\n".join(service_block(i) for i in range(1, n + 1))
+    out = HEADER.format(n=n) + "\nservices:\n" + drones + "\n" + app_block(n)
     Path("docker-compose.yaml").write_text(out)
-    ports = ", ".join(str(50050 + i) for i in range(1, n + 1))
-    print(f"已產生 {n} 台的 docker-compose.yaml(gRPC host ports: {ports})")
-    print(f"記得:cd server && DRONE_COUNT={n} uv run uvicorn server:app --reload")
+    print(f"已產生全容器化的 docker-compose.yaml({n} 台 + backend + web)")
+    print("一鍵全起: docker compose up --build  →  開 http://localhost:5173")
 
 
 if __name__ == "__main__":

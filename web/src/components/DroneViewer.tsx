@@ -10,7 +10,11 @@ import { droneFrame } from '../lib/droneIcon'
 const HOME_LON = 8.5456
 const HOME_LAT = 47.3977
 
-const ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN as string | undefined
+// 先用 runtime 注入的 window.CESIUM_ION_TOKEN(全容器化:nginx 啟動時依 env 寫入 config.js),
+// 沒有就 fallback build 時的 import.meta.env(host 開發用 web/.env)。都沒有 → OpenStreetMap。
+const ION_TOKEN =
+  (window as unknown as { CESIUM_ION_TOKEN?: string }).CESIUM_ION_TOKEN ||
+  (import.meta.env.VITE_CESIUM_ION_TOKEN as string | undefined)
 if (ION_TOKEN) Cesium.Ion.defaultAccessToken = ION_TOKEN
 
 const VIEW_FROM = new Cesium.Cartesian3(0, -250, 200)

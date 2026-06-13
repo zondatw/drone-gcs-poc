@@ -11,11 +11,33 @@ PX4 SITL + MAVSDK PoC, running on Apple Silicon Mac with Docker Desktop.
 
 ```
 drone/
-  server/             ← Python 後端 (server.py, telemetry.py, pyproject.toml) — 在這裡跑 uv
-  web/                ← React + Cesium 前端
-  gen_compose.py      ← 產生 N 台的 docker-compose.yaml(第 4 關)
-  docker-compose.yaml ← 由 gen_compose.py 產生(預設 3 台)
+  server/             ← Python 後端 (server.py, telemetry.py, Dockerfile)
+  web/                ← React + Cesium 前端 (Dockerfile + nginx.conf)
+  gen_compose.py      ← 產生全容器化的 docker-compose.yaml
+  docker-compose.yaml ← 由 gen_compose.py 產生
 ```
+
+## 一鍵啟動(全容器:前端 + 後端 + N 台無人機)
+
+```sh
+python gen_compose.py 2          # 想要幾台帶幾(全容器化建議 2 台,3 台很吃 CPU)
+docker compose up --build        # 第一次需 build images;之後 docker compose up
+# 開 http://localhost:5173 —— 等各台 GPS lock(~30s)後就能用
+```
+
+可行的關鍵:後端↔mavsdk_server 走 **gRPC(TCP)**,跨容器沒問題;會被 Docker for Mac 丟掉的 **UDP MAVLink**
+一直留在 `px4-sitl-{i}` 容器的 netns 裡(`mavsdk-{i}` 共用),完全不用動。後端容器當每個 mavsdk_server 的
+**唯一** gRPC client,連 `px4-sitl-{i}:50051`;前端 nginx 把 `/api`、`/ws` proxy 給後端。
+
+要 Cesium 衛星圖(選用):token 是**啟動時注入**(不烤進 image)—— `docker compose up` 前設好環境變數即可:
+
+```sh
+export VITE_CESIUM_ION_TOKEN=你的token   # 或放在 repo 根目錄的 .env(compose 會讀)
+docker compose up                        # 沒帶 → 自動 OpenStreetMap
+```
+
+機制:`web` service 用 `environment` 把 token 傳給容器,nginx 啟動時寫出 `config.js`
+(`web/docker-entrypoint-cesium.sh`),前端讀 `window.CESIUM_ION_TOKEN`。同一個 image 可重用、不含 token。
 
 ## Why not run mavsdk_server on the Mac host?
 
@@ -41,14 +63,20 @@ so packets sent from a container to `host.docker.internal` are silently dropped.
 容器只提供 PX4 + mavsdk_server,Python 客戶端一律跑在 Mac host —— 這樣
 mavsdk_server 只有**一個** gRPC 客戶端;兩個客戶端會讓 arm/takeoff 的命令 ACK timeout。
 
-## Run
+## 開發模式(只起 infra、前後端在 host 跑,有 hot reload)
+
+`docker compose up` 預設會把**前端 + 後端 + 無人機**整包起來(見上)。開發時想要 hot reload,就只起 infra
+容器、前後端自己在 host 跑:
 
 ```sh
-docker compose up                       # PX4 + mavsdk_server,等 GPS lock (~30s)
-cd server && uv run python telemetry.py  # 第 1 關: 在 host 印遙測
+docker compose up px4-sitl-1 mavsdk-1 [px4-sitl-2 mavsdk-2 ...]   # 只起無人機 infra(對外 gRPC 5005i)
+cd server && DRONE_COUNT=2 uv run uvicorn server:app --reload      # host 後端(連 localhost:5005i)
+cd web && npm run dev                                             # host 前端 → http://localhost:5173
+
+cd server && uv run python telemetry.py                           # 第 1 關: 只在 host 印遙測(擇一)
 ```
 
-`uv` 指令都要在 `server/` 底下跑（pyproject.toml 在那裡）。連到容器內已對外的 gRPC 50051,印出位置/電量/模式。
+`uv` 指令都要在 `server/` 底下跑(pyproject.toml 在那裡)。host 模式下後端預設連 `localhost:50051、50052…`。
 
 ## Cached binaries
 
