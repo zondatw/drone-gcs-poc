@@ -230,3 +230,18 @@ cd web && npm test
   端點用 FastAPI `TestClient`(不跑 lifespan,不連線)。
 - 前端 [web/src/lib/*.test.ts](web/src/lib):`vitest.config.ts` 用 node 環境、不載 cesium plugin,
   透過 `useStore.getState()` 測 store。
+
+## 失聯偵測
+
+![demo](./readme_pictures/lose.png)  
+
+後端持續監看每台的 **MAVLink heartbeat**(`System.core.connection_state()`,即 keep-alive)→ 即時更新
+`connected`;每筆遙測蓋 `last_seen` → snapshot 帶 `stale_s`(最後更新幾秒前)。`connect_and_watch` 是
+**重連迴圈**:串流中斷(mavsdk_server 重啟 → gRPC 斷)會自動重連。前端任一台 `connected=false` 或
+`stale_s>4` 即判**失聯** —— 選台 chip 顯示「失聯」、儀表板橫幅「最後更新 Ns 前」、地圖標記轉灰、**該台指令全停用**。
+
+模擬測試:`docker compose pause px4-sitl-1`(heartbeat 停 → 幾秒內失聯,`unpause` 恢復)、
+`docker compose stop mavsdk-1`(gRPC 斷 → 後端重連,`start` 恢復)。各台獨立、互不影響。
+
+> 真實 datalink loss 的**安全動作**(RTL/Land/Hold)是 **PX4 自己的 failsafe**(`NAV_DLL_ACT`)在管;
+> GCS 只負責偵測/告警/顯示,並反映飛控模式變化。

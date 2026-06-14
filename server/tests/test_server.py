@@ -76,8 +76,30 @@ def test_snapshot_shape():
     snap = a.snapshot()
     assert snap["id"] == 2
     assert snap["offboard"] is False
-    for k in ("lat", "lon", "rel_alt", "flight_mode", "armed", "connected"):
+    for k in ("lat", "lon", "rel_alt", "flight_mode", "armed", "connected", "stale_s"):
         assert k in snap
+
+
+# ── 失聯偵測:stale_s + _watch_connection ─────────────────────────────────
+def test_stale_s_none_until_touch():
+    a = make_agent()
+    assert a.snapshot()["stale_s"] is None
+    a._touch()
+    s = a.snapshot()["stale_s"]
+    assert s is not None and 0 <= s < 1
+
+
+async def test_watch_connection_updates_connected():
+    a = make_agent()
+    states = [True, False, True]
+
+    async def gen():
+        for v in states:
+            yield SimpleNamespace(is_connected=v)
+    a.system.core.connection_state = lambda: gen()
+
+    await a._watch_connection()  # 跑到串流結束
+    assert a.latest["connected"] is True  # 反映最後一個狀態
 
 
 # ── goto():相對高度 → AMSL ──────────────────────────────────────────────

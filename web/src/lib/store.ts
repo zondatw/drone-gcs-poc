@@ -19,13 +19,14 @@ export interface Telemetry {
   mission_current: number | null
   mission_total: number | null
   connected: boolean | null
+  stale_s: number | null // 距上次收到遙測幾秒(失聯/新鮮度判斷)
 }
 
 const EMPTY: Telemetry = {
   id: null, lat: null, lon: null, abs_alt: null, rel_alt: null, ground_alt: null,
   heading: null, ground_speed: null, vd: null, vn: null, ve: null,
   battery_pct: null, flight_mode: null, armed: null,
-  mission_current: null, mission_total: null, connected: null,
+  mission_current: null, mission_total: null, connected: null, stale_s: null,
 }
 
 export interface Waypoint {

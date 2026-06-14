@@ -7,7 +7,7 @@ function tel(p: Partial<Telemetry>): Telemetry {
     id: null, lat: null, lon: null, abs_alt: null, rel_alt: null, ground_alt: null,
     heading: null, ground_speed: null, vd: null, vn: null, ve: null,
     battery_pct: null, flight_mode: null, armed: null,
-    mission_current: null, mission_total: null, connected: null, ...p,
+    mission_current: null, mission_total: null, connected: null, stale_s: null, ...p,
   }
 }
 

@@ -19,6 +19,7 @@ import contextlib
 import json
 import logging
 import os
+import time
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -93,6 +94,7 @@ class DroneAgent:
         self.port = port if port is not None else BASE_GRPC_PORT + index
         self.system = System(mavsdk_server_address=host, port=self.port)
         self.offboard_active = False
+        self.last_seen: float | None = None  # 最後一次收到遙測的 monotonic 時間
         self.latest: dict = {
             "id": index,
             "lat": None, "lon": None,
@@ -103,41 +105,56 @@ class DroneAgent:
             "connected": False,
         }
 
-    def snapshot(self) -> dict:
-        return {**self.latest, "offboard": self.offboard_active}
+    def _touch(self) -> None:
+        self.last_seen = time.monotonic()
 
-    # ── 連線 + 遙測訂閱 ──────────────────────────────────────────────────
+    def snapshot(self) -> dict:
+        # stale_s:距上次收到遙測幾秒(前端判斷新鮮度 / 失聯用);還沒收過 → None。
+        stale_s = None if self.last_seen is None else round(time.monotonic() - self.last_seen, 1)
+        return {**self.latest, "offboard": self.offboard_active, "stale_s": stale_s}
+
+    # ── 連線 + 遙測訂閱(reconnect 迴圈)──────────────────────────────────
     async def connect_and_watch(self) -> None:
         tag = f"[drone {self.index}]"
-        # mavsdk_server 可能還沒起來(全容器化時),連不上就重試。
+        # 整段包在重連迴圈:mavsdk_server 還沒起來、或串流中途斷掉(mavsdk_server 重啟 → gRPC 斷)
+        # 都會回到這裡重連、重訂閱。heartbeat 停掉(pause px4-sitl)則由 _watch_connection 即時反映。
         while True:
             try:
                 log.info(f">>> {tag} 連線到 mavsdk_server ({self.host}:{self.port})...")
                 await self.system.connect()
+
                 async for state in self.system.core.connection_state():
                     if state.is_connected:
                         log.info(f">>> {tag} 已連線到 PX4!")
                         self.latest["connected"] = True
                         break
-                break
-            except Exception as e:  # gRPC 還沒 ready 等
+
+                async for health in self.system.telemetry.health():
+                    if health.is_global_position_ok and health.is_home_position_ok:
+                        log.info(f">>> {tag} 定位完成,開始推播遙測。")
+                        break
+
+                # 持續監看連線 + 所有遙測;任一串流出錯(gRPC 斷)就跳出去重連。
+                await asyncio.gather(
+                    self._watch_connection(),
+                    self._watch_position(), self._watch_attitude(), self._watch_velocity(),
+                    self._watch_battery(), self._watch_flight_mode(), self._watch_armed(),
+                    self._watch_mission_progress(),
+                )
+            except Exception as e:
+                log.info(f">>> {tag} 連線/串流中斷,5s 後重連: {e}")
+            finally:
                 self.latest["connected"] = False
-                log.info(f">>> {tag} 連線失敗,5s 後重試: {e}")
-                await asyncio.sleep(5)
+            await asyncio.sleep(5)
 
-        async for health in self.system.telemetry.health():
-            if health.is_global_position_ok and health.is_home_position_ok:
-                log.info(f">>> {tag} 定位完成,開始推播遙測。")
-                break
-
-        await asyncio.gather(
-            self._watch_position(), self._watch_attitude(), self._watch_velocity(),
-            self._watch_battery(), self._watch_flight_mode(), self._watch_armed(),
-            self._watch_mission_progress(),
-        )
+    async def _watch_connection(self) -> None:
+        # 持續接 MAVLink heartbeat 的連線狀態(失聯偵測的核心):停了 → False、回來 → True。
+        async for state in self.system.core.connection_state():
+            self.latest["connected"] = state.is_connected
 
     async def _watch_position(self) -> None:
         async for p in self.system.telemetry.position():
+            self._touch()
             self.latest["lat"] = p.latitude_deg
             self.latest["lon"] = p.longitude_deg
             self.latest["abs_alt"] = p.absolute_altitude_m
@@ -168,7 +185,7 @@ class DroneAgent:
             self.latest["armed"] = armed
 
     async def _watch_mission_progress(self) -> None:
-        async for mp in self.system.telemetry.mission_progress():
+        async for mp in self.system.mission.mission_progress():
             self.latest["mission_current"] = mp.current
             self.latest["mission_total"] = mp.total
 

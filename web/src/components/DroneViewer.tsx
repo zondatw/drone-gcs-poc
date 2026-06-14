@@ -167,6 +167,8 @@ export function DroneViewer() {
         if (t.lat == null || t.lon == null) return null
         const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.rel_alt ?? 0)
         const isActive = i === activeIndex
+        // 失聯(heartbeat 沒了或遙測停滯)→ 標記轉灰半透明,表示資料停滯。
+        const lost = t.connected === false || (t.stale_s != null && t.stale_s > 4)
         const trail = d.trail.length >= 6 ? Cesium.Cartesian3.fromDegreesArrayHeights(d.trail) : []
         // 機首對齊「飛行方向」:移動中用航跡(velocity),否則用機頭 yaw。
         // 把 ENU 方位向量轉成世界座標,當 billboard 的 alignedAxis → 不管鏡頭怎麼轉都對齊真實方位。
@@ -186,6 +188,7 @@ export function DroneViewer() {
               image={new Cesium.CallbackProperty(() => droneFrame(droneColor(i)), false)}
               alignedAxis={headingAxis}
               scale={isActive ? 0.62 : 0.46}
+              color={lost ? Cesium.Color.GRAY.withAlpha(0.45) : undefined}
               disableDepthTestDistance={Number.POSITIVE_INFINITY}
             />
             <LabelGraphics

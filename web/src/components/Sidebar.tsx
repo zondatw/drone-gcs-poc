@@ -135,10 +135,17 @@ export function Sidebar() {
   const missionActive = t?.mission_total != null && t.mission_total > 0
   const missionAt = t?.mission_current == null || t.mission_current < 0 ? 0 : t.mission_current
 
+  // ── 失聯判斷:MAVLink heartbeat(connected)沒了,或遙測停滯超過門檻 ──
+  const STALE_S = 4
+  const linkLost = (d: DroneClient) =>
+    d.telemetry.connected === false ||
+    (d.telemetry.stale_s != null && d.telemetry.stale_s > STALE_S)
+  const lost = active ? linkLost(active) : false
+
   // ── 按鈕前置條件(用可靠的遙測;flight_mode 可靠,mission_total 不可靠不用)──
   const isAirborne = (d: DroneClient) => (d.telemetry.rel_alt ?? 0) > 1.5
   const isRunning = (d: DroneClient) => /MISSION|TAKEOFF/.test(d.telemetry.flight_mode ?? '')
-  const conn = connected && !!t?.connected
+  const conn = connected && !!t?.connected && !lost // 失聯時所有指令 disable
   const armed = !!t?.armed
   const airborne = active ? isAirborne(active) : false
   const running = active ? isRunning(active) : false
@@ -159,14 +166,18 @@ export function Sidebar() {
         {drones.map((d, i) => (
           <button
             key={i}
-            className={`drone-chip${i === activeIndex ? ' active' : ''}`}
+            className={`drone-chip${i === activeIndex ? ' active' : ''}${linkLost(d) ? ' lost' : ''}`}
             onClick={() => setActiveIndex(i)}
           >
-            <span className="chip-dot" style={{ background: droneColor(i) }} />
+            <span className="chip-dot" style={{ background: linkLost(d) ? '#888' : droneColor(i) }} />
             D{i + 1}
-            <span className={`chip-batt ${d.telemetry.battery_pct != null && d.telemetry.battery_pct <= 20 ? 'bad' : ''}`}>
-              {d.telemetry.battery_pct == null ? '—' : `${d.telemetry.battery_pct.toFixed(0)}%`}
-            </span>
+            {linkLost(d) ? (
+              <span className="chip-batt bad">失聯</span>
+            ) : (
+              <span className={`chip-batt ${d.telemetry.battery_pct != null && d.telemetry.battery_pct <= 20 ? 'bad' : ''}`}>
+                {d.telemetry.battery_pct == null ? '—' : `${d.telemetry.battery_pct.toFixed(0)}%`}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -200,10 +211,16 @@ export function Sidebar() {
       {/* ── 連線 + 遙測 (active) ── */}
       <section className="card">
         <div className="conn">
-          <span className={`dot ${connected && t?.connected ? 'ok' : 'bad'}`} />
+          <span className={`dot ${connected && t?.connected && !lost ? 'ok' : 'bad'}`} />
           控制中:<b style={{ color: droneColor(activeIndex) }}>D{activeIndex + 1}</b>
           <span className="mode-pill">{mode}</span>
         </div>
+
+        {lost && (
+          <div className="link-lost">
+            ⚠ 失聯 · 最後更新 {t?.stale_s != null ? `${t.stale_s.toFixed(0)}s` : '?'} 前(指令已停用)
+          </div>
+        )}
 
         <div className="batt-row">
           <span>電量</span>
