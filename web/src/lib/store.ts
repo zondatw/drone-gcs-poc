@@ -34,6 +34,16 @@ export interface Waypoint {
   lon: number
 }
 
+// 飛控主動送的訊息(STATUSTEXT):arming 失敗原因、預檢失敗、模式拒絕…
+export type Severity = 'info' | 'warn' | 'err'
+export interface AppMessage {
+  id: number
+  drone: number
+  sev: Severity
+  text: string
+  t: number // epoch 秒
+}
+
 // 指令送出回饋用的 toast。
 export type ToastKind = 'ok' | 'warn' | 'err'
 export interface Toast {
@@ -66,8 +76,9 @@ interface State {
   connected: boolean // 遙測 WS 是否連上
   follow: boolean
   toasts: Toast[] // 指令送出回饋
+  messages: AppMessage[] // 飛控訊息 log(全機共用)
 
-  setTelemetry: (payload: { drones: Telemetry[] }) => void
+  setTelemetry: (payload: { drones: Telemetry[]; messages?: AppMessage[] }) => void
   setConnected: (c: boolean) => void
   setActiveIndex: (i: number) => void
   setFollow: (v: boolean) => void
@@ -100,13 +111,15 @@ export const useStore = create<State>((set) => ({
   connected: false,
   follow: true,
   toasts: [],
+  messages: [],
 
   pushToast: (text, kind) =>
     set((s) => ({ toasts: [...s.toasts, { id: ++toastSeq, text, kind }] })),
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
-  setTelemetry: ({ drones: ts }) =>
+  setTelemetry: ({ drones: ts, messages }) =>
     set((s) => ({
+      ...(messages ? { messages } : null),
       drones: ts.map((t, i) => {
         const prev = s.drones[i] ?? makeDrone()
         const trail = prev.trail

@@ -14,7 +14,7 @@ function tel(p: Partial<Telemetry>): Telemetry {
 const s = () => useStore.getState()
 
 beforeEach(() => {
-  useStore.setState({ drones: [], activeIndex: 0, toasts: [], connected: false, follow: true })
+  useStore.setState({ drones: [], activeIndex: 0, toasts: [], connected: false, follow: true, messages: [] })
 })
 
 describe('setTelemetry', () => {
@@ -23,6 +23,17 @@ describe('setTelemetry', () => {
     expect(s().drones.length).toBe(2)
     expect(s().drones[0].telemetry.lat).toBe(47)
     expect(s().drones[1].telemetry.lon).toBe(8.1)
+  })
+
+  it('payload 帶 messages 時更新 messages,沒帶時保留', () => {
+    s().setTelemetry({
+      drones: [tel({ lat: 47, lon: 8 })],
+      messages: [{ id: 1, drone: 0, sev: 'err', text: 'Arming denied', t: 1700000000 }],
+    })
+    expect(s().messages.length).toBe(1)
+    expect(s().messages[0].sev).toBe('err')
+    s().setTelemetry({ drones: [tel({ lat: 47.001, lon: 8 })] }) // 沒帶 messages
+    expect(s().messages.length).toBe(1) // 保留
   })
 
   it('移動時累積軌跡、靜止時不重複加點', () => {

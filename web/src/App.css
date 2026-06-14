@@ -284,3 +284,47 @@ button.ghost { background: transparent; }
   background: rgba(251, 189, 35, 0.12);
   border-radius: 6px;
 }
+
+/* ── 飛控訊息 log ── */
+.msg-card h3 { display: flex; align-items: center; gap: 6px; }
+.msg-count {
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0c1119;
+  background: #93a7bd;
+  border-radius: 999px;
+}
+.msg-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.msg {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 3px solid #5a6b7d;
+  border-radius: 5px;
+}
+.msg-info { border-left-color: #5a6b7d; }
+.msg-warn { border-left-color: #fbbd23; background: rgba(251, 189, 35, 0.08); }
+.msg-err { border-left-color: #f87272; background: rgba(248, 114, 114, 0.1); }
+.msg-drone { flex: 0 0 auto; font-weight: 700; font-size: 11px; }
+.msg-text { flex: 1; color: #dbe5ef; word-break: break-word; }
+.msg-err .msg-text { color: #ffd9d9; }
+.msg-time {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #7f93a8;
+  font-variant-numeric: tabular-nums;
+}

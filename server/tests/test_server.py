@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from mavsdk.action import ActionError
 from mavsdk.mission import MissionError, MissionItem
+from mavsdk.telemetry import StatusTextType
 
 import server
 
@@ -100,6 +101,56 @@ async def test_watch_connection_updates_connected():
 
     await a._watch_connection()  # 跑到串流結束
     assert a.latest["connected"] is True  # 反映最後一個狀態
+
+
+# ── 飛控訊息(STATUSTEXT)log ──────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def clear_messages():
+    server.messages.clear()
+    yield
+    server.messages.clear()
+
+
+def test_severity_mapping():
+    assert server._severity(StatusTextType.INFO) == "info"
+    assert server._severity(StatusTextType.DEBUG) == "info"
+    assert server._severity(StatusTextType.NOTICE) == "warn"
+    assert server._severity(StatusTextType.WARNING) == "warn"
+    assert server._severity(StatusTextType.ERROR) == "err"
+    assert server._severity(StatusTextType.CRITICAL) == "err"
+    assert server._severity(StatusTextType.EMERGENCY) == "err"
+
+
+def test_push_message_shape_and_cap():
+    server._push_message(1, "err", "Arming denied")
+    m = server.messages[-1]
+    assert m["drone"] == 1 and m["sev"] == "err" and m["text"] == "Arming denied"
+    assert isinstance(m["id"], int) and isinstance(m["t"], float)
+    # 環形緩衝有上限,不會無限長
+    for i in range(200):
+        server._push_message(0, "info", f"m{i}")
+    assert len(server.messages) <= server.messages.maxlen
+    # id 單調遞增(最新在後)
+    assert server.messages[-1]["id"] > server.messages[0]["id"]
+
+
+async def test_watch_status_text_collects_messages():
+    a = make_agent(1)
+    items = [
+        SimpleNamespace(type=StatusTextType.INFO, text="Ready to fly"),
+        SimpleNamespace(type=StatusTextType.ERROR, text="Arming denied: Resolve system health failures first"),
+    ]
+
+    async def gen():
+        for it in items:
+            yield it
+    a.system.telemetry.status_text = lambda: gen()
+
+    await a._watch_status_text()
+    texts = [m["text"] for m in server.messages]
+    assert "Ready to fly" in texts
+    arm = next(m for m in server.messages if "Arming denied" in m["text"])
+    assert arm["sev"] == "err" and arm["drone"] == 1
 
 
 # ── goto():相對高度 → AMSL ──────────────────────────────────────────────
@@ -226,6 +277,13 @@ def test_state_endpoint_shape(client):
     body = r.json()
     assert "drones" in body and len(body["drones"]) == len(server.agents)
     assert body["drones"][0]["id"] == 0
+    assert "messages" in body
+
+
+def test_messages_endpoint(client):
+    server._push_message(0, "warn", "Preflight check failed")
+    body = client.get("/api/messages").json()
+    assert any(m["text"] == "Preflight check failed" and m["sev"] == "warn" for m in body["messages"])
 
 
 def test_all_arm_fans_out(client):

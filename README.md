@@ -233,7 +233,7 @@ cd web && npm test
 
 ## 失聯偵測
 
-![demo](./readme_pictures/lose.png)  
+![lose](./readme_pictures/lose.png)  
 
 後端持續監看每台的 **MAVLink heartbeat**(`System.core.connection_state()`,即 keep-alive)→ 即時更新
 `connected`;每筆遙測蓋 `last_seen` → snapshot 帶 `stale_s`(最後更新幾秒前)。`connect_and_watch` 是
@@ -245,3 +245,15 @@ cd web && npm test
 
 > 真實 datalink loss 的**安全動作**(RTL/Land/Hold)是 **PX4 自己的 failsafe**(`NAV_DLL_ACT`)在管;
 > GCS 只負責偵測/告警/顯示,並反映飛控模式變化。
+
+## 飛控訊息 log(STATUSTEXT)
+
+![log](./readme_pictures/log.png)  
+
+後端訂閱每台的 **MAVLink STATUSTEXT**(`telemetry.status_text()`)—— 飛控主動送的人類可讀訊息
+(`Armed`、`Taking off`、`RTL: start return`、`Landing`…,以及失敗原因如 **`Arming denied: Resolve
+system health failures first`**)。`_watch_status_text` 把訊息依嚴重度(`_severity`:ERROR/CRITICAL → `err`、
+WARNING/NOTICE → `warn`、其餘 `info`)收進全機共用環形緩衝,隨遙測 WS 一起推給前端,也可 `GET /api/messages` 取。
+
+前端側欄「飛控訊息」面板:最新在上,依嚴重度標色(紅/黃/灰),帶 `D{n}` 機號與時間。直接攤開
+「**為什麼不能 arm / 為什麼不動**」的黑箱 —— 失敗原因不用再去翻終端機 log。

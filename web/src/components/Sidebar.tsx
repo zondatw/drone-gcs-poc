@@ -3,6 +3,7 @@ import { useStore, type DroneClient } from '../lib/store'
 import { api } from '../lib/api'
 import { randomRoute } from '../lib/route'
 import { droneColor } from './DroneViewer'
+import { Messages } from './Messages'
 import { useKeyboardControl } from '../hooks/useKeyboardControl'
 
 // 該台的中心點:有遙測座標就用它(地面時即起飛點),否則 fallback home(Zurich + i·0.0008)。
@@ -320,6 +321,9 @@ export function Sidebar() {
           </div>
         )}
       </section>
+
+      {/* ── 飛控訊息 log(全機共用)── */}
+      <Messages />
 
       <button className="wide ghost" onClick={resetTrail}>清除 D{activeIndex + 1} 軌跡</button>
     </aside>

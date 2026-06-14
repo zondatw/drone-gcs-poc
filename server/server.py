@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import time
+from collections import deque
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,6 +71,27 @@ async def cmd(coro):
         return {"ok": True}
     except (ActionError, MissionError) as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── 飛控訊息(STATUSTEXT)──────────────────────────────────────────────────
+# 飛控主動送的人類可讀訊息(arming 失敗原因、預檢失敗、模式拒絕…)。全機共用一個環形緩衝。
+messages: deque = deque(maxlen=60)
+_msg_seq = 0
+
+
+def _push_message(drone: int, sev: str, text: str) -> None:
+    global _msg_seq
+    _msg_seq += 1
+    messages.append({"id": _msg_seq, "drone": drone, "sev": sev, "text": text, "t": time.time()})
+
+
+def _severity(st_type) -> str:
+    name = str(st_type).rsplit(".", 1)[-1].upper()
+    if name in ("EMERGENCY", "ALERT", "CRITICAL", "ERROR"):
+        return "err"
+    if name in ("WARNING", "NOTICE"):
+        return "warn"
+    return "info"
 
 
 def _make_item(lat: float, lon: float, alt: float, speed: float) -> MissionItem:
@@ -139,7 +161,7 @@ class DroneAgent:
                     self._watch_connection(),
                     self._watch_position(), self._watch_attitude(), self._watch_velocity(),
                     self._watch_battery(), self._watch_flight_mode(), self._watch_armed(),
-                    self._watch_mission_progress(),
+                    self._watch_mission_progress(), self._watch_status_text(),
                 )
             except Exception as e:
                 log.info(f">>> {tag} 連線/串流中斷,5s 後重連: {e}")
@@ -188,6 +210,15 @@ class DroneAgent:
         async for mp in self.system.mission.mission_progress():
             self.latest["mission_current"] = mp.current
             self.latest["mission_total"] = mp.total
+
+    async def _watch_status_text(self) -> None:
+        # 飛控主動送的人類可讀訊息(STATUSTEXT):arming 失敗原因、預檢失敗、模式拒絕…
+        # 把「為什麼不能 arm / 為什麼不動」這個黑箱攤開給前端訊息面板。
+        async for st in self.system.telemetry.status_text():
+            sev = _severity(st.type)
+            text = st.text.strip()
+            _push_message(self.index, sev, text)
+            log.info(f">>> [drone {self.index}] STATUSTEXT[{sev}] {text}")
 
     # ── 動作 ────────────────────────────────────────────────────────────
     async def arm(self):
@@ -301,7 +332,7 @@ subscribers: set[asyncio.Queue] = set()
 
 
 def all_snapshot() -> str:
-    return json.dumps({"drones": [a.snapshot() for a in agents]})
+    return json.dumps({"drones": [a.snapshot() for a in agents], "messages": list(messages)})
 
 
 def broadcast() -> None:
@@ -507,4 +538,10 @@ async def api_all_rtl():
 
 @app.get("/api/state")
 async def api_state():
-    return {"drones": [a.snapshot() for a in agents]}
+    return {"drones": [a.snapshot() for a in agents], "messages": list(messages)}
+
+
+@app.get("/api/messages")
+async def api_messages():
+    # 飛控訊息 log(全機共用環形緩衝,最新在後)。
+    return {"messages": list(messages)}
